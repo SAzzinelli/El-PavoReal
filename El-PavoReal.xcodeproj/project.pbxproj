@@ -7,13 +7,13 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		FCE9463F2E59D3E900490D79 /* myCoppola.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = myCoppola.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FCE9463F2E59D3E900490D79 /* El-PavoReal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "El-PavoReal.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		FCE946412E59D3E900490D79 /* myCoppola */ = {
+		FCE946412E59D3E900490D79 /* El-PavoReal */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = myCoppola;
+			path = "El-PavoReal";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -32,7 +32,7 @@
 		FCE946362E59D3E900490D79 = {
 			isa = PBXGroup;
 			children = (
-				FCE946412E59D3E900490D79 /* myCoppola */,
+				FCE946412E59D3E900490D79 /* El-PavoReal */,
 				FCE946402E59D3E900490D79 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -40,7 +40,7 @@
 		FCE946402E59D3E900490D79 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				FCE9463F2E59D3E900490D79 /* myCoppola.app */,
+				FCE9463F2E59D3E900490D79 /* El-PavoReal.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,9 +48,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		FCE9463E2E59D3E900490D79 /* myCoppola */ = {
+		FCE9463E2E59D3E900490D79 /* El-PavoReal */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = FCE9464A2E59D3EA00490D79 /* Build configuration list for PBXNativeTarget "myCoppola" */;
+			buildConfigurationList = FCE9464A2E59D3EA00490D79 /* Build configuration list for PBXNativeTarget "El-PavoReal" */;
 			buildPhases = (
 				FCE9463B2E59D3E900490D79 /* Sources */,
 				FCE9463C2E59D3E900490D79 /* Frameworks */,
@@ -61,13 +61,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				FCE946412E59D3E900490D79 /* myCoppola */,
+				FCE946412E59D3E900490D79 /* El-PavoReal */,
 			);
-			name = myCoppola;
+			name = "El-PavoReal";
 			packageProductDependencies = (
 			);
 			productName = myCoppola;
-			productReference = FCE9463F2E59D3E900490D79 /* myCoppola.app */;
+			productReference = FCE9463F2E59D3E900490D79 /* El-PavoReal.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -85,7 +85,7 @@
 					};
 				};
 			};
-			buildConfigurationList = FCE9463A2E59D3E900490D79 /* Build configuration list for PBXProject "myCoppola" */;
+			buildConfigurationList = FCE9463A2E59D3E900490D79 /* Build configuration list for PBXProject "El-PavoReal" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -99,7 +99,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				FCE9463E2E59D3E900490D79 /* myCoppola */,
+				FCE9463E2E59D3E900490D79 /* El-PavoReal */,
 			);
 		};
 /* End PBXProject section */
@@ -251,23 +251,31 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = "El-PavoReal/El-PavoReal.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 9747WYS86R;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "El-PavoReal";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UILaunchStoryboardName = Splash.swift;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 18;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.labafirenze.myCoppola;
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simoneazzinelli.pavogotchi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -283,23 +291,31 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = "El-PavoReal/El-PavoReal.entitlements";
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 35;
 				DEVELOPMENT_TEAM = 9747WYS86R;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "El-PavoReal";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UILaunchStoryboardName = Splash.swift;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				IPHONEOS_DEPLOYMENT_TARGET = 18;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.labafirenze.myCoppola;
+				MARKETING_VERSION = 1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.simoneazzinelli.pavogotchi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
@@ -313,7 +329,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		FCE9463A2E59D3E900490D79 /* Build configuration list for PBXProject "myCoppola" */ = {
+		FCE9463A2E59D3E900490D79 /* Build configuration list for PBXProject "El-PavoReal" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FCE946482E59D3EA00490D79 /* Debug */,
@@ -322,7 +338,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		FCE9464A2E59D3EA00490D79 /* Build configuration list for PBXNativeTarget "myCoppola" */ = {
+		FCE9464A2E59D3EA00490D79 /* Build configuration list for PBXNativeTarget "El-PavoReal" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				FCE9464B2E59D3EA00490D79 /* Debug */,
