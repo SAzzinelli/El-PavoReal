@@ -6,9 +6,87 @@
 //  Created by Simone Azzinelli on 23/08/25.
 
 import SwiftUI
+import AVKit
+import UserNotifications
+import CoreLocation
 
 extension Notification.Name {
     static let switchToTab = Notification.Name("switchToTab")
+}
+
+// MARK: - Location Manager
+class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
+    private let locationManager = CLLocationManager()
+    @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
+    @Published var currentLocation: CLLocation?
+    @Published var isNearVenue: Bool = false
+    @Published var distanceToVenue: Double = 0
+    
+    // Coordinate del locale El-PavoReal (esempio - da aggiornare con quelle reali)
+    private let venueLocation = CLLocation(latitude: 45.4642, longitude: 9.1900) // Milano Duomo come esempio
+    private let geofenceRadius: Double = 20.0 // 20 metri
+    
+    override init() {
+        super.init()
+        locationManager.delegate = self
+        locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.distanceFilter = 5.0 // Aggiorna ogni 5 metri
+    }
+    
+    func requestLocationPermission() {
+        locationManager.requestWhenInUseAuthorization()
+    }
+    
+    func startLocationUpdates() {
+        guard authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways else {
+            requestLocationPermission()
+            return
+        }
+        locationManager.startUpdatingLocation()
+    }
+    
+    func stopLocationUpdates() {
+        locationManager.stopUpdatingLocation()
+    }
+    
+    // MARK: - CLLocationManagerDelegate
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        currentLocation = location
+        
+        let distance = location.distance(from: venueLocation)
+        distanceToVenue = distance
+        
+        let wasNearVenue = isNearVenue
+        isNearVenue = distance <= geofenceRadius
+        
+        // Notifica se l'utente è entrato o uscito dalla zona
+        if !wasNearVenue && isNearVenue {
+            NotificationCenter.default.post(name: .init("UserEnteredVenue"), object: nil)
+        } else if wasNearVenue && !isNearVenue {
+            NotificationCenter.default.post(name: .init("UserExitedVenue"), object: nil)
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        authorizationStatus = status
+        
+        switch status {
+        case .authorizedWhenInUse, .authorizedAlways:
+            startLocationUpdates()
+        case .denied, .restricted:
+            isNearVenue = false
+            stopLocationUpdates()
+        case .notDetermined:
+            requestLocationPermission()
+        @unknown default:
+            break
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("Location error: \(error.localizedDescription)")
+    }
 }
 
 // MARK: - 🎬 Local Video Models
@@ -1744,54 +1822,6 @@ struct KPICard: View {
     }
 }
 
-// MARK: - Main App with Tabs
-struct ContentView: View {
-    @StateObject private var vm = PetViewModel()
-    @State private var selectedTab = 0 // Parte da H-ZOO Home
-    
-    var body: some View {
-        TabView(selection: $selectedTab) {
-            // Tab 1: H-ZOO Home
-            HomeTabView()
-                .tabItem {
-                    Label("H-ZOO", systemImage: "party.popper.fill")
-                }
-                .tag(0)
-            
-            // Tab 2: Tavolo
-            PrenotaTabView()
-                .tabItem {
-                    Label("Tavolo", systemImage: "wineglass")
-                }
-                .tag(1)
-            
-            // Tab 3: Prezzi
-            PrezziView()
-                .tabItem {
-                    Label("Prezzi", systemImage: "eurosign.circle")
-                }
-                .tag(2)
-            
-            // Tab 4: Minigame
-            MinigameTabView()
-                .environmentObject(vm)
-                .tabItem {
-                    Label("Minigame", systemImage: "gamecontroller.fill")
-                }
-                .tag(3)
-        }
-        .tint(HZooConfig.primaryNeon)
-        .onReceive(NotificationCenter.default.publisher(for: .switchToTab)) { notification in
-            if let tabIndex = notification.object as? Int {
-                selectedTab = tabIndex
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            // Quando l'app torna in foreground (da notifica), vai al minigame
-            selectedTab = 3 // Tab Minigame
-        }
-    }
-}
 
 // MARK: - H-ZOO Countdown ViewModel
 class HZooCountdownViewModel: ObservableObject {
@@ -2006,10 +2036,19 @@ struct HomeTabView: View {
     @StateObject private var countdownVM = HZooCountdownViewModel()
     @StateObject private var settings = SettingsModel()
     @EnvironmentObject var minigameManager: MinigameManager
+    @EnvironmentObject var locationManager: LocationManager
     @State private var selectedVideo: LocalVideo?
     @State private var scrollOffset: CGFloat = 0
     @State private var timerGlow = false
+    @State private var showLocationPermissionAlert = false
     @Environment(\.scenePhase) private var scenePhase
+    
+    // Debug flags (passed from ContentView)
+    @Binding var debugTestBanner: Bool
+    @Binding var debugTestSigla: Bool
+    @Binding var debugTestMinigame: Bool
+    @Binding var debugTestSerata: Bool
+    @Binding var debugTestSerataOmaggio: Bool
     
     // Messaggio dinamico basato su genere iOS
     private var dynamicMotivationalMessage: String {
@@ -2021,25 +2060,38 @@ struct HomeTabView: View {
         NavigationStack {
             ZStack(alignment: .top) {
                 ScrollView(showsIndicators: false) {
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: ScrollOffsetPreferenceKey.self, value: geometry.frame(in: .named("scroll")).minY)
+                    }
+                    .frame(height: 0)
+                    
                     VStack(spacing: 20) {
-                        // Spacer per banner se presente
-                        if countdownVM.isEventActive {
-                            Color.clear.frame(height: 64)
+                        // Spacer per banner fissi se presenti (solo Dynamic Island e Serata in Corso)
+                        if countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio {
+                            let dynamicIslandHeight: CGFloat = 60
+                            let serataBannerHeight: CGFloat = 100 // Aggiornato per nuovo gradiente unificato
+                            let totalHeight = dynamicIslandHeight + serataBannerHeight
+                            
+                            Color.clear.frame(height: totalHeight)
                         }
                         
                         // Hero Section
                         heroSection
-                            .padding(.top, countdownVM.isEventActive ? 0 : 8)
+                            .padding(.top, (countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio) ? 0 : 8)
                         
                         
-                        // Evento Questo Venerdì (se siamo prima della serata)
-                        if !countdownVM.isEventActive {
-                            thisWeekEventSection
+                        // Evento Questo Venerdì (sempre visibile)
+                        thisWeekEventSection
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                        
+                        // Omaggio Donna (solo durante serata o debug) - SOTTO QUESTO VENERDI
+                        if (countdownVM.isEventActive && countdownVM.showLadiesFreeBadge) || debugTestBanner || debugTestSerataOmaggio {
+                            ladiesFreeCard
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
                         
-                        // Micro-quote (solo 1:30-2:00 durante serata)
-                        if countdownVM.showSiglaQuote {
+                        // Micro-quote (solo 1:30-2:00 durante serata o debug)
+                        if countdownVM.showSiglaQuote || debugTestSigla {
                             siglaQuoteSection
                                 .transition(.scale.combined(with: .opacity))
                         }
@@ -2050,18 +2102,14 @@ struct HomeTabView: View {
                                 .transition(.move(edge: .leading).combined(with: .opacity))
                         }
                         
-                        // Countdown o Stato Serata
-                        countdownSection
-                        
-                        // NUOVO: Gioco della Serata
-                        if let eventGame = minigameManager.currentEventGame {
-                            eventGameCard(eventGame)
-                                .transition(.move(edge: .top).combined(with: .opacity))
+                        // Countdown o Stato Serata (solo se non c'è sigla attiva)
+                        if !countdownVM.showSiglaQuote && !debugTestSigla {
+                            countdownSection
                         }
                         
-                        // Omaggio Donna (solo venerdì sera)
-                        if countdownVM.showLadiesFreeBadge {
-                            ladiesFreeCard
+                        // NUOVO: Gioco della Serata (solo durante l'evento o debug)
+                        if (countdownVM.isEventActive || debugTestMinigame), let eventGame = minigameManager.currentEventGame {
+                            eventGameCard(eventGame)
                                 .transition(.move(edge: .top).combined(with: .opacity))
                         }
                         
@@ -2080,14 +2128,24 @@ struct HomeTabView: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 40)
                 }
+                .coordinateSpace(name: "scroll")
+                .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                    scrollOffset = value
+                }
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: countdownVM.isEventActive)
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: countdownVM.showSiglaQuote)
                 
-                // Banner "Serata in Corso" (sempre visibile in alto se attivo)
-                if countdownVM.isEventActive {
+                // Banner "Serata in Corso" (sempre visibile in alto se attivo o debug)
+                if countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio {
                     serataInCorsoBanner
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                
+                // MARK: - Dynamic Scroll Gradient (come iOS Musica) - DEVE ESSERE L'ULTIMO
+                ScrollGradientOverlay(
+                    scrollOffset: scrollOffset,
+                    isEventActive: countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio
+                )
             }
             .background(Color.black.ignoresSafeArea())
         }
@@ -2106,48 +2164,69 @@ struct HomeTabView: View {
     
     // MARK: - Banner Serata in Corso
     private var serataInCorsoBanner: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(HZooConfig.primaryNeon)
-                .frame(width: 10, height: 10)
-                .modifier(PulsingDot())
-            
-            Text("SERATA IN CORSO")
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(HZooConfig.textWhite)
-            
-            Spacer()
-            
-            if countdownVM.showLadiesFreeBadge {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.caption)
-                    Text("Omaggio ♀ scade tra \(countdownVM.ladiesCountdown)")
-                        .font(.caption.weight(.medium))
+        VStack(spacing: 0) {
+            // Gradiente che continua sopra il banner per nascondere il contenuto sottostante
+            LinearGradient(
+                colors: [
+                    HZooConfig.primaryNeon,
+                    HZooConfig.primaryNeon.opacity(0.95),
+                    HZooConfig.primaryNeon.opacity(0.9),
+                    HZooConfig.primaryNeon.opacity(0.8),
+                    HZooConfig.primaryNeon.opacity(0.6),
+                    HZooConfig.primaryNeon.opacity(0.4),
+                    Color.clear
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 100)
+            .ignoresSafeArea(.container, edges: .top)
+            .overlay(alignment: .bottom) {
+                // Contenuto del banner sovrapposto al gradiente
+                HStack(spacing: 12) {
+                    Circle()
+                        .fill(HZooConfig.primaryNeon)
+                        .frame(width: 10, height: 10)
+                        .modifier(PulsingDot())
+                    
+                    Text("SERATA IN CORSO")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                    
+                    Spacer()
+                    
+                    if countdownVM.showLadiesFreeBadge || debugTestSerataOmaggio {
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkles")
+                                .font(.caption)
+                            Text("Omaggio ♀ scade tra \(debugTestSerataOmaggio ? "01:00" : countdownVM.ladiesCountdown)")
+                                .font(.caption.weight(.medium))
+                        }
+                        .foregroundStyle(HZooConfig.accentCyan)
+                    }
                 }
-                .foregroundStyle(HZooConfig.accentCyan)
-            }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-        .background(
-            Rectangle()
-                .fill(HZooConfig.primaryNeon.opacity(0.15))
-                .overlay(
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
+                .background(
                     Rectangle()
-                        .fill(
-                            LinearGradient(
-                                colors: [HZooConfig.primaryNeon.opacity(0.3), .clear],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
+                        .fill(HZooConfig.primaryNeon.opacity(0.3))
+                        .overlay(
+                            Rectangle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [HZooConfig.primaryNeon.opacity(0.5), .clear],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
                         )
                 )
-        )
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(HZooConfig.primaryNeon)
-                .frame(height: 1)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(HZooConfig.primaryNeon)
+                        .frame(height: 1)
+                }
+            }
         }
     }
     
@@ -2624,7 +2703,7 @@ struct HomeTabView: View {
                     .foregroundStyle(.white.opacity(0.6))
                     .tracking(0.5)
                 
-                Text(countdownVM.ladiesCountdown)
+                Text(debugTestBanner ? "01:00" : countdownVM.ladiesCountdown)
                     .font(.title2.weight(.bold))
                     .foregroundStyle(HZooConfig.primaryNeon)
                     .monospacedDigit()
@@ -2796,115 +2875,6 @@ struct HomeTabView: View {
     }
 }
 
-// MARK: - 💰 Prezzi View (Separata)
-struct PrezziView: View {
-    
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 24) {
-                    // Hero
-                    VStack(spacing: 12) {
-                        Image(systemName: "eurosign.circle.fill")
-                            .font(.system(size: 50))
-                            .foregroundStyle(HZooConfig.primaryNeon)
-                        
-                        Text("Info Prezzi")
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(HZooConfig.textWhite)
-                    }
-                    .padding(.top, 24)
-                    
-                    // Prezzi Ingresso
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("💸 Ingresso")
-                            .font(.headline)
-                            .foregroundStyle(HZooConfig.textWhite)
-                        
-                        VStack(spacing: 12) {
-                            priceRow(icon: "👔", title: "Uomo", price: HZooConfig.priceMan, detail: "Valido tutta la notte")
-                            priceRow(icon: "👗", title: "Donna", price: "Omaggio", detail: "Omaggio entro le 00:30, poi 15€")
-                        }
-                        .padding(16)
-                        .background(Color(hex: "1a1a1a"))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                    
-                    // Servizi
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("🎫 Servizi")
-                            .font(.headline)
-                            .foregroundStyle(HZooConfig.textWhite)
-                        
-                        VStack(spacing: 12) {
-                            priceRow(icon: "🧥", title: "Guardaroba", price: HZooConfig.priceCoatCheck, detail: "Obbligatorio per giacche e borse")
-                            priceRow(icon: "🍸", title: "Consumazione", price: HZooConfig.priceDrink, detail: "Drink e cocktail")
-                        }
-                        .padding(16)
-                        .background(Color(hex: "1a1a1a"))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                    
-                    // Note
-                    VStack(alignment: .leading, spacing: 12) {
-                        Label("Info Utili", systemImage: "info.circle.fill")
-                            .font(.headline)
-                            .foregroundStyle(HZooConfig.accentCyan)
-                        
-                        VStack(alignment: .leading, spacing: 8) {
-                            noteRow(text: "Pagamenti: contanti e carte")
-                            noteRow(text: "Ingresso non rimborsabile")
-                            noteRow(text: "Prezzi soggetti a variazioni per eventi speciali")
-                        }
-                        .padding(16)
-                        .background(Color(hex: "1a1a1a"))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 32)
-            }
-            .background(Color.black.ignoresSafeArea())
-            .navigationBarTitleDisplayMode(.inline)
-        }
-        .onAppear {
-            trackEvent("view_prezzi")
-        }
-    }
-    
-    private func priceRow(icon: String, title: String, price: String, detail: String) -> some View {
-        HStack(spacing: 12) {
-            Text(icon)
-                .font(.title)
-            
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(HZooConfig.textWhite)
-                
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(HZooConfig.textWhite.opacity(0.6))
-            }
-            
-            Spacer()
-            
-            Text(price)
-                .font(.title3.weight(.bold))
-                .foregroundStyle(HZooConfig.primaryNeon)
-        }
-    }
-    
-    private func noteRow(text: String) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("•")
-                .foregroundStyle(HZooConfig.accentCyan)
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(HZooConfig.textWhite.opacity(0.85))
-        }
-    }
-}
 
 // MARK: - Custom Button Style (iOS 26-like)
 private struct ScaleButtonStyle: ButtonStyle {
@@ -2963,6 +2933,7 @@ private struct EventGameInfoRow: View {
 
 struct PrenotaTabView: View {
     @State private var showComingSoon = false
+    @EnvironmentObject var locationManager: LocationManager
     
     var body: some View {
         NavigationStack {
@@ -3495,6 +3466,7 @@ struct ComingSoonView: View {
 struct MinigameTabView: View {
     @EnvironmentObject var vm: PetViewModel
     @EnvironmentObject var minigameManager: MinigameManager
+    @EnvironmentObject var locationManager: LocationManager
     
     // Layout constants
     private let contentWidth: CGFloat = 392
@@ -3546,6 +3518,7 @@ struct MinigameTabView: View {
     @State private var showDailySlot = false
     @State private var showPavoLireInfo = false
     @State private var eventLog: [LoggedEvent] = []
+    @State private var showMenuOptions = false
     @AppStorage("El-PavoReal.seenTutorial") private var seenTutorial: Bool = false
     @AppStorage("El-PavoReal.lastActive") private var lastActiveTS: Double = Date().timeIntervalSince1970
     @AppStorage("El-PavoReal.lastDailySlotDate") private var lastDailySlotDate: String = ""
@@ -3575,6 +3548,9 @@ struct MinigameTabView: View {
     private func canPlaySlotToday() -> Bool {
         // Controlla se siamo nella finestra oraria 01:00 - 03:00 (sabato notte)
         guard isSlotTimeWindow() else { return false }
+        
+        // Controlla se siamo vicini al locale (geofencing)
+        guard locationManager.isNearVenue else { return false }
         
         let today = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
         if lastDailySlotDate != today {
@@ -3626,19 +3602,19 @@ struct MinigameTabView: View {
         switch prize {
         case .coins(let amount):
             vm.PavoLire += amount
-            enqueueEventOverlay(EventOverlayItem(title: "JACKPOT! 🎰", icon: "dollarsign.circle.fill", tone: .positive, lines: ["+\(amount) PavoLire!"]))
+            enqueueEventOverlay(EventOverlayItem(title: "JACKPOT! 🎰", icon: "dollarsign.circle.fill", tone: .positive, lines: ["+\(amount) PavoLire!"], autoDismiss: false, duration: 3.0))
         case .xp(let amount):
             vm.xp += amount
-            enqueueEventOverlay(EventOverlayItem(title: "BONUS XP! ⭐", icon: "star.fill", tone: .positive, lines: ["+\(amount) XP guadagnati!"]))
+            enqueueEventOverlay(EventOverlayItem(title: "BONUS XP! ⭐", icon: "star.fill", tone: .positive, lines: ["+\(amount) XP guadagnati!"], autoDismiss: false, duration: 3.0))
         case .booster(let minutes):
             vm.boostUntil = Date().addingTimeInterval(TimeInterval(minutes * 60))
             vm.activeBoosterItemTitle = "Slot Machine"
             vm.activeBoosterItemSymbol = "gamecontroller.fill"
-            enqueueEventOverlay(EventOverlayItem(title: "BOOSTER! ⚡", icon: "bolt.heart.fill", tone: .positive, lines: ["Decadimenti dimezzati per \(minutes) min!"]))
+            enqueueEventOverlay(EventOverlayItem(title: "BOOSTER! ⚡", icon: "bolt.heart.fill", tone: .positive, lines: ["Decadimenti dimezzati per \(minutes) min!"], autoDismiss: false, duration: 3.0))
         case .statBoost:
             vm.satiety = min(vm.statCap, vm.satiety + 30)
             vm.energy = min(vm.statCap, vm.energy + 30)
-            enqueueEventOverlay(EventOverlayItem(title: "ENERGIA! ✨", icon: "sparkles", tone: .positive, lines: ["+30 a entrambe!"]))
+            enqueueEventOverlay(EventOverlayItem(title: "ENERGIA! ✨", icon: "sparkles", tone: .positive, lines: ["+30 a entrambe!"], autoDismiss: false, duration: 3.0))
         }
     }
     
@@ -3676,7 +3652,7 @@ struct MinigameTabView: View {
         // Reset cooldown Bevuta
         setDeadline("El-PavoReal.drinkNextReadyAt", seconds: 60 * 5)
         
-        enqueueEventOverlay(EventOverlayItem(title: name, icon: "wineglass.fill", tone: .positive, lines: ["Bevuta servita!"]))
+        enqueueEventOverlay(EventOverlayItem(title: name, icon: "wineglass.fill", tone: .positive, lines: ["Bevuta servita!"], autoDismiss: true, duration: 2.0))
     }
     
     /// Menu: Scegli shot (Tequila, Jägerbomb, Sambuca, Rum e Lime)
@@ -3696,7 +3672,7 @@ struct MinigameTabView: View {
         case "Rum e Lime":      bump(\PetViewModel.energy, 11)
         default: break
         }
-        enqueueEventOverlay(EventOverlayItem(title: name, icon: "bolt.fill", tone: .positive, lines: ["Shot fatto!"]))
+        enqueueEventOverlay(EventOverlayItem(title: name, icon: "bolt.fill", tone: .positive, lines: ["Shot fatto!"], autoDismiss: true, duration: 2.0))
     }
     
     /// Menu: Scegli relax (Respiro, Stretching, Pausa, Reset)
@@ -3716,7 +3692,7 @@ struct MinigameTabView: View {
         case "Reset mentale":       bump(\PetViewModel.hygiene, 7)
         default: break
         }
-        enqueueEventOverlay(EventOverlayItem(title: name, icon: "sparkles", tone: .positive, lines: ["Reset mentale!"]))
+        enqueueEventOverlay(EventOverlayItem(title: name, icon: "sparkles", tone: .positive, lines: ["Reset mentale!"], autoDismiss: true, duration: 2.0))
     }
     
     /// Menu: Scegli ingresso (Pista, SIGLA, Giro, Selfie)
@@ -3736,7 +3712,7 @@ struct MinigameTabView: View {
         case "Selfie con Pavo":   bump(\PetViewModel.happiness, 6); vm.PavoLire += 2
         default: break
         }
-        enqueueEventOverlay(EventOverlayItem(title: name, icon: "party.popper.fill", tone: .positive, lines: ["Vai in pista!"]))
+        enqueueEventOverlay(EventOverlayItem(title: name, icon: "party.popper.fill", tone: .positive, lines: ["Vai in pista!"], autoDismiss: true, duration: 2.0))
     }
     
     var body: some View {
@@ -3939,7 +3915,7 @@ struct MinigameTabView: View {
             let toneStr = (note.userInfo?["tone"] as? String)?.lowercased() ?? "system"
             let tone: EventTone = (toneStr == "positive") ? .positive : (toneStr == "negative" ? .negative : .system)
             let lines = note.userInfo?["lines"] as? [String] ?? []
-            enqueueEventOverlay(EventOverlayItem(title: title, icon: icon, tone: tone, lines: lines))
+            enqueueEventOverlay(EventOverlayItem(title: title, icon: icon, tone: tone, lines: lines, autoDismiss: false, duration: 3.0))
         }
         .overlay(alignment: .center) {
             if let it = currentEventOverlay {
@@ -4542,50 +4518,77 @@ private struct ConfettiBurst: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 12) {
-                Text("El-PavoReal")
-                    .font(.system(size: 26, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                    .layoutPriority(1)
-
-                Spacer(minLength: 8)
-
-                // PavoLire: icona + numero, clickable
+                Spacer()
+                
+                // PavoLire: sempre visibile
                 Button {
                     showPavoLireInfo = true
                 } label: {
-                CoinBadge(value: vm.PavoLire)
+                    CoinBadge(value: vm.PavoLire)
                 }
                 .buttonStyle(.plain)
-
-                // Icone toolbar con sfondo circolare leggero
-                Button { showShop = true } label: {
-                    Image(systemName: "cart")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.white)
+                
+                // Menu collassabile per Shop, Eventi, Impostazioni
+                ZStack {
+                    // Menu aperto
+                    if showMenuOptions {
+                        HStack(spacing: 12) {
+                            Button { 
+                                showShop = true
+                                showMenuOptions = false
+                            } label: {
+                                Image(systemName: "cart")
+                                    .font(.title3.weight(.semibold))
+                                    .foregroundStyle(.white)
+                            }
+                            .buttonStyle(.plain)
+                            .frame(width: 34, height: 34)
+                            .background(.ultraThinMaterial.opacity(0.3), in: Circle())
+                            .transition(.scale.combined(with: .opacity))
+                            
+                            Button { 
+                                showEventLog = true
+                                showMenuOptions = false
+                            } label: {
+                                Image(systemName: "clock")
+                                    .font(.title3.weight(.semibold))
+                                    .foregroundStyle(.white)
+                            }
+                            .buttonStyle(.plain)
+                            .frame(width: 34, height: 34)
+                            .background(.ultraThinMaterial.opacity(0.3), in: Circle())
+                            .transition(.scale.combined(with: .opacity))
+                            
+                            Button { 
+                                showSettings = true
+                                showMenuOptions = false
+                            } label: {
+                                Image(systemName: "gearshape")
+                                    .font(.title3.weight(.semibold))
+                                    .foregroundStyle(.white)
+                            }
+                            .buttonStyle(.plain)
+                            .frame(width: 34, height: 34)
+                            .background(.ultraThinMaterial.opacity(0.3), in: Circle())
+                            .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                    
+                    // Pulsante menu principale
+                    Button { 
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showMenuOptions.toggle()
+                        }
+                        haptic(.soft)
+                    } label: {
+                        Image(systemName: showMenuOptions ? "xmark" : "ellipsis")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 34, height: 34)
+                    .background(.ultraThinMaterial.opacity(0.3), in: Circle())
                 }
-                .buttonStyle(.plain)
-                .frame(width: 34, height: 34)
-                .background(.ultraThinMaterial.opacity(0.3), in: Circle())
-
-                Button { showEventLog = true } label: {
-                    Image(systemName: "clock")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-                .frame(width: 34, height: 34)
-                .background(.ultraThinMaterial.opacity(0.3), in: Circle())
-
-                Button { showSettings = true } label: {
-                    Image(systemName: "gearshape")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-                .frame(width: 34, height: 34)
-                .background(.ultraThinMaterial.opacity(0.3), in: Circle())
             }
             HStack(spacing: 10) {
                 LevelBadge(level: vm.level, onTap: { haptic(.soft); showLevelInfo = true })
@@ -4776,9 +4779,9 @@ fileprivate struct StatTile: View {
                 vm.feedNutellino()
                 AchievementsCenter.shared.recordFeed()
                 setDeadline("El-PavoReal.feedNextReadyAt", seconds: 120) // 4 min
-                pushBanner(text: "Drink bevuto! +22 Sete",
-                           symbol: "wineglass.fill",
-                           colors: GradientTokens.satiety)
+                showQuickToast("Drink bevuto! +22 Sete", 
+                               symbol: "wineglass.fill", 
+                               colors: GradientTokens.satiety)
             }
             .onLongPressGesture {
                 // Solo se NON c'è cooldown attivo
@@ -4801,9 +4804,9 @@ fileprivate struct StatTile: View {
                 vm.coffeeBreak()
                 AchievementsCenter.shared.recordCoffee()
                 setDeadline("El-PavoReal.coffeeNextReadyAt", seconds: 90) // 3 min
-                pushBanner(text: "Shot al bancone! +24 Energia",
-                           symbol: "bolt.fill",
-                           colors: [.pink, .purple])
+                showQuickToast("Shot al bancone! +24 Energia", 
+                               symbol: "bolt.fill", 
+                               colors: [.pink, .purple])
             }
             .onLongPressGesture {
                 // Solo se NON c'è cooldown attivo
@@ -4827,9 +4830,9 @@ fileprivate struct StatTile: View {
                 vm.pulisciScrivania()
                 AchievementsCenter.shared.recordClean()
                 setDeadline("El-PavoReal.cleanNextReadyAt", seconds: 120) // 2 min
-                pushBanner(text: "Reset mentale! +26 Chill",
-                           symbol: "sparkles",
-                           colors: [.teal, .blue])
+                showQuickToast("Reset mentale! +26 Chill", 
+                               symbol: "sparkles", 
+                               colors: [.teal, .blue])
             }
             .onLongPressGesture {
                 // Solo se NON c'è cooldown attivo
@@ -4852,9 +4855,9 @@ fileprivate struct StatTile: View {
                 vm.orientaSuMeet()
                 AchievementsCenter.shared.recordMeet()
                 setDeadline("El-PavoReal.meetNextReadyAt", seconds: 200) // 5 min
-                pushBanner(text: "Alza la voce e canta insieme a noi! +2 P£",
-                           symbol: "music.microphone",
-                           colors: [.yellow, .orange])
+                showQuickToast("Alza la voce e canta insieme a noi! +2 P£", 
+                               symbol: "music.microphone", 
+                               colors: [.yellow, .orange])
             }
             .onLongPressGesture {
                 // Solo se NON c'è cooldown attivo
@@ -5043,11 +5046,20 @@ fileprivate struct StatTile: View {
 
         // Mostra overlay full screen
         postOverlayEvent(title: title, icon: symbol, tone: tone, lines: lines)
-
-        // Registra nel Centro Eventi
-        if log {
-            eventLog.append(LoggedEvent(date: Date(), text: text, symbol: symbol, colors: colors))
-        }
+    }
+    
+    // MARK: - Notifiche Non Invasive per Azioni Principali
+    private func showQuickToast(_ text: String, symbol: String, colors: [Color]) {
+        // Aggiungi toast alla coda che scompare automaticamente
+        let toast = EventOverlayItem(
+            title: text,
+            icon: symbol,
+            tone: .positive,
+            lines: [],
+            autoDismiss: true,
+            duration: 2.0
+        )
+        enqueueEventOverlay(toast)
     }
 
 // MARK: - Helper Components for New Tabs
@@ -7318,6 +7330,17 @@ private struct EventOverlayItem: Identifiable {
     let icon: String
     let tone: EventTone
     let lines: [String]
+    let autoDismiss: Bool
+    let duration: TimeInterval
+    
+    init(title: String, icon: String, tone: EventTone, lines: [String] = [], autoDismiss: Bool = false, duration: TimeInterval = 3.0) {
+        self.title = title
+        self.icon = icon
+        self.tone = tone
+        self.lines = lines
+        self.autoDismiss = autoDismiss
+        self.duration = duration
+    }
 }
 
 private struct EventOverlayView: View {
@@ -7374,14 +7397,16 @@ private struct EventOverlayView: View {
                     .padding(.horizontal)
                 }
 
-                Button(action: onDismiss) {
-                    Text("Ok, ricevuto")
-                        .font(.headline)
-                        .padding(.horizontal, 18).padding(.vertical, 10)
-                        .background(.white, in: Capsule())
-                        .foregroundStyle(.black)
+                if !item.autoDismiss {
+                    Button(action: onDismiss) {
+                        Text("Ok, ricevuto")
+                            .font(.headline)
+                            .padding(.horizontal, 18).padding(.vertical, 10)
+                            .background(.white, in: Capsule())
+                            .foregroundStyle(.black)
+                    }
+                    .padding(.top, 2)
                 }
-                .padding(.top, 2)
             }
             .padding(20)
             .frame(maxWidth: 520)
@@ -7396,6 +7421,13 @@ private struct EventOverlayView: View {
                 case .positive: gen.notificationOccurred(.success)
                 case .negative: gen.notificationOccurred(.warning)
                 case .system:   gen.notificationOccurred(.warning)
+                }
+                
+                // Auto-dismiss per notifiche non invasive
+                if item.autoDismiss {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + item.duration) {
+                        onDismiss()
+                    }
                 }
             }
         }
@@ -9326,6 +9358,7 @@ struct SettingsView: View {
     @State private var showDefaultsAlert = false
     @State private var requestedNotif = false
     @State private var showTutorial = false
+    @State private var showDebugTools = false
 
     var body: some View {
         NavigationStack {
@@ -9410,44 +9443,8 @@ struct SettingsView: View {
                                     title: "Notifiche push",
                                     system: "bell.fill",
                                     isOn: $notificationsEnabled,
-                                    subtitle: "Ricevi avvisi quando il Pavo ha bisogno"
+                                    subtitle: "Ricevi promemoria per prenderti cura del Pavone"
                                 )
-                                
-                                if !requestedNotif {
-                                Button {
-                                    requestedNotif = true
-                                    UNUserNotificationCenter.current()
-                                        .requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
-                                        haptic(.medium)
-                                } label: {
-                                        HStack {
-                                            Image(systemName: "checkmark.seal.fill")
-                                                .foregroundStyle(.blue)
-                                            Text("Richiedi permessi")
-                                                .font(.subheadline.bold())
-                                                .foregroundStyle(.white)
-                                            Spacer()
-                                            Image(systemName: "arrow.right")
-                                                .font(.caption)
-                                                .foregroundStyle(.blue)
-                                        }
-                                        .padding(12)
-                                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                                        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.blue.opacity(0.3), lineWidth: 1))
-                                }
-                                .buttonStyle(.plain)
-                                } else {
-                                    HStack {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundStyle(.green)
-                                        Text("Permessi richiesti")
-                                            .font(.subheadline)
-                                .foregroundStyle(.white)
-                                Spacer()
-                                    }
-                                    .padding(12)
-                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                                }
                             }
                         }
 
@@ -9462,228 +9459,241 @@ struct SettingsView: View {
                                     showTutorial = true
                                 }
                                 
-                            // DEBUG: Slider probabilità slot
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Image(systemName: "percent")
-                                        .font(.title3)
-                                        .foregroundStyle(.purple)
-                                        .frame(width: 24)
-                                    
-                                    Text("Probabilità Vittoria")
-                                        .font(.subheadline.bold())
-                                        .foregroundStyle(.white)
-                                    
-                                    Spacer()
-                                    
-                                    Text("\(Int(vm.slotWinChance * 100))%")
-                                        .font(.caption.bold())
-                                        .foregroundStyle(.purple)
-                                        .padding(.horizontal, 8).padding(.vertical, 4)
-                                        .background(.ultraThinMaterial, in: Capsule())
-                                }
-                                
-                                Slider(value: $vm.slotWinChance, in: 0.01...0.5, step: 0.01)
-                                    .tint(.purple)
-                                
-                                Text("Debug: 1% = normale, 50% = test facile")
-                                    .font(.caption2)
-                                    .foregroundStyle(.white.opacity(0.7))
-                            }
-                            .padding(12)
-                            .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
-                            
-                            SettingsNavRow(
-                                title: "Reset Slot (Debug)",
-                                system: "arrow.clockwise.circle.fill",
-                                tint: .purple
-                            ) {
-                                UserDefaults.standard.set("", forKey: "El-PavoReal.lastDailySlotDate")
-                                UserDefaults.standard.set(0, forKey: "El-PavoReal.dailySlotTries")
-                                UserDefaults.standard.set(false, forKey: "El-PavoReal.slotWonToday")
-                                vm.slotWinChance = 0.01 // Reset a 1%
-                                haptic(.soft)
-                            }
-                            
-                            // DEBUG: Test mood sprites
-                            SettingsSection(title: "Test Mood Sprites", icon: "theatermasks.fill") {
-                                VStack(spacing: 8) {
-                                    Button {
-                                        vm.happiness = 75
-                                        vm.satiety = 75
-                                        vm.energy = 75
-                                        vm.hygiene = 75
-                                        vm.life = 75
-                                        haptic(.soft)
-                                    } label: {
-                                        HStack {
-                                            Text("😊 Felice")
-                                            Spacer()
-                                            Text("pavone_felice").font(.caption2).foregroundStyle(.gray)
-                                        }
-                                        .padding(12)
-                                        .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    Button {
-                                        vm.energy = 25
-                                        haptic(.soft)
-                                    } label: {
-                                        HStack {
-                                            Text("😴 Stanchezza")
-                                            Spacer()
-                                            Text("pavone_assonnato").font(.caption2).foregroundStyle(.gray)
-                                        }
-                                        .padding(12)
-                                        .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    Button {
-                                        vm.happiness = 25
-                                        vm.satiety = 25
-                                        haptic(.soft)
-                                    } label: {
-                                        HStack {
-                                            Text("😠 Rabbia")
-                                            Spacer()
-                                            Text("pavone_arrabbiato").font(.caption2).foregroundStyle(.gray)
-                                        }
-                                        .padding(12)
-                                        .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    Button {
-                                        vm.happiness = 35
-                                        vm.energy = 55
-                                        vm.satiety = 55
-                                        haptic(.soft)
-                                    } label: {
-                                        HStack {
-                                            Text("😑 Noia")
-                                            Spacer()
-                                            Text("pavone_noia").font(.caption2).foregroundStyle(.gray)
-                                        }
-                                        .padding(12)
-                                        .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    Button {
-                                        vm.life = 10
-                                        vm.satiety = 10
-                                        haptic(.soft)
-                                    } label: {
-                                        HStack {
-                                            Text("😔 Critico/Triste")
-                                            Spacer()
-                                            Text("pavone_triste").font(.caption2).foregroundStyle(.gray)
-                                        }
-                                        .padding(12)
-                                        .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                                    }
-                                    .buttonStyle(.plain)
-                                    
-                                    Button {
-                                        vm.happiness = 50
-                                        vm.satiety = 50
-                                        vm.energy = 50
-                                        vm.hygiene = 50
-                                        vm.life = 50
-                                        haptic(.soft)
-                                    } label: {
-                                        HStack {
-                                            Text("😐 Neutro")
-                                            Spacer()
-                                            Text("pavone_neutro").font(.caption2).foregroundStyle(.gray)
-                                        }
-                                        .padding(12)
-                                        .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                                
-                                SettingsNavRow(
-                                    title: "Ripristina Default",
-                                           system: "arrow.counterclockwise.circle.fill",
-                                    tint: .orange
-                                ) {
-                                showDefaultsAlert = true
-                            }
-                            .alert("Ripristinare i valori di default?", isPresented: $showDefaultsAlert) {
-                                Button("Annulla", role: .cancel) {}
-                                Button("Ripristina", role: .destructive) {
-                                        eventChance = 0.35
-                                    cooldownHints = true
-                                        haptic(.medium)
-                                }
-                            } message: {
-                                Text("Reimposta le preferenze di gioco e interfaccia.")
-                            }
-
-                                SettingsNavRow(
-                                    title: "Resuscita il Pavone",
-                                           system: "heart.text.square.fill",
-                                    tint: .red
-                                ) {
-                                showResetAlert = true
-                            }
-                            .alert("Resuscitare e ribilanciare?", isPresented: $showResetAlert) {
-                                Button("Annulla", role: .cancel) {}
-                                Button("Conferma", role: .destructive) {
-                                    withAnimation {
-                                        vm.life = 100
-                                            vm.satiety = max(vm.satiety, 60)
-                                            vm.energy = max(vm.energy, 60)
-                                            vm.hygiene = max(vm.hygiene, 60)
-                                        vm.happiness = max(vm.happiness, 60)
-                                    }
-                                        haptic(.heavy)
-                                }
-                            } message: {
-                                Text("Porta la Vita a 100 e riallinea le statistiche se sono troppo basse.")
-                                }
-                            }
-                        }
-
-                        // MARK: - Info App
-                        SettingsSection(title: "ℹ️ Informazioni", icon: "info.circle.fill") {
-                            VStack(spacing: 12) {
-                                HStack {
-                                    Image(systemName: "app.badge")
-                                        .font(.title3)
-                                        .foregroundStyle(.cyan)
-                                        .frame(width: 24)
-                                    
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("El-PavoReal")
-                                            .font(.subheadline.bold())
-                                            .foregroundStyle(.white)
-                                        Text("Versione 1.0 • Build TestFlight")
-                                            .font(.caption)
-                                            .foregroundStyle(.white.opacity(0.7))
-                                    }
-                                    
-                                    Spacer()
-                                }
-                                
                                 Divider()
                                     .background(.white.opacity(0.2))
                                 
-                                HStack {
-                                    Image(systemName: "heart.fill")
-                                        .font(.title3)
-                                        .foregroundStyle(.pink)
-                                        .frame(width: 24)
-                                    
-                                    Text("Con amore per il pavone")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.white)
-                                    
-                                    Spacer()
+                                // MARK: - Debug Tools (collapsable)
+                                Button {
+                                    withAnimation(.spring(response: 0.3)) {
+                                        showDebugTools.toggle()
+                                    }
+                                    haptic(.soft)
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "ladybug.fill")
+                                            .font(.title3)
+                                            .foregroundStyle(.orange)
+                                            .frame(width: 24)
+                                        
+                                        Text("Debug Tools")
+                                            .font(.subheadline.bold())
+                                            .foregroundStyle(.white)
+                                        
+                                        Spacer()
+                                        
+                                        Image(systemName: showDebugTools ? "chevron.up" : "chevron.down")
+                                            .font(.caption)
+                                            .foregroundStyle(.white.opacity(0.6))
+                                    }
+                                    .padding(12)
+                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.orange.opacity(0.3), lineWidth: 1))
+                                }
+                                .buttonStyle(.plain)
+                                
+                                if showDebugTools {
+                                    VStack(spacing: 12) {
+                                        // DEBUG: Slider probabilità slot
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            HStack {
+                                                Image(systemName: "percent")
+                                                    .font(.title3)
+                                                    .foregroundStyle(.purple)
+                                                    .frame(width: 24)
+                                                
+                                                Text("Probabilità Vittoria Slot")
+                                                    .font(.subheadline.bold())
+                                                    .foregroundStyle(.white)
+                                                
+                                                Spacer()
+                                                
+                                                Text("\(Int(vm.slotWinChance * 100))%")
+                                                    .font(.caption.bold())
+                                                    .foregroundStyle(.purple)
+                                                    .padding(.horizontal, 8).padding(.vertical, 4)
+                                                    .background(.ultraThinMaterial, in: Capsule())
+                                            }
+                                            
+                                            Slider(value: $vm.slotWinChance, in: 0.01...0.5, step: 0.01)
+                                                .tint(.purple)
+                                            
+                                            Text("1% = normale, 50% = test facile")
+                                                .font(.caption2)
+                                                .foregroundStyle(.white.opacity(0.7))
+                                        }
+                                        .padding(12)
+                                        .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+                                        
+                                        SettingsNavRow(
+                                            title: "Reset Slot",
+                                            system: "arrow.clockwise.circle.fill",
+                                            tint: .purple
+                                        ) {
+                                            UserDefaults.standard.set("", forKey: "El-PavoReal.lastDailySlotDate")
+                                            UserDefaults.standard.set(0, forKey: "El-PavoReal.dailySlotTries")
+                                            UserDefaults.standard.set(false, forKey: "El-PavoReal.slotWonToday")
+                                            vm.slotWinChance = 0.01 // Reset a 1%
+                                            haptic(.soft)
+                                        }
+                                        
+                                        // DEBUG: Test mood sprites
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            HStack {
+                                                Image(systemName: "theatermasks.fill")
+                                                    .font(.title3)
+                                                    .foregroundStyle(.pink)
+                                                    .frame(width: 24)
+                                                
+                                                Text("Test Mood Sprites")
+                                                    .font(.subheadline.bold())
+                                                    .foregroundStyle(.white)
+                                            }
+                                            .padding(.bottom, 4)
+                                            
+                                            VStack(spacing: 8) {
+                                                Button {
+                                                    vm.happiness = 75
+                                                    vm.satiety = 75
+                                                    vm.energy = 75
+                                                    vm.hygiene = 75
+                                                    vm.life = 75
+                                                    haptic(.soft)
+                                                } label: {
+                                                    HStack {
+                                                        Text("😊 Felice")
+                                                        Spacer()
+                                                        Text("pavone_felice").font(.caption2).foregroundStyle(.gray)
+                                                    }
+                                                    .padding(12)
+                                                    .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                                                }
+                                                .buttonStyle(.plain)
+                                                
+                                                Button {
+                                                    vm.energy = 25
+                                                    haptic(.soft)
+                                                } label: {
+                                                    HStack {
+                                                        Text("😴 Stanchezza")
+                                                        Spacer()
+                                                        Text("pavone_assonnato").font(.caption2).foregroundStyle(.gray)
+                                                    }
+                                                    .padding(12)
+                                                    .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                                                }
+                                                .buttonStyle(.plain)
+                                                
+                                                Button {
+                                                    vm.happiness = 25
+                                                    vm.satiety = 25
+                                                    haptic(.soft)
+                                                } label: {
+                                                    HStack {
+                                                        Text("😠 Rabbia")
+                                                        Spacer()
+                                                        Text("pavone_arrabbiato").font(.caption2).foregroundStyle(.gray)
+                                                    }
+                                                    .padding(12)
+                                                    .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                                                }
+                                                .buttonStyle(.plain)
+                                                
+                                                Button {
+                                                    vm.happiness = 35
+                                                    vm.energy = 55
+                                                    vm.satiety = 55
+                                                    haptic(.soft)
+                                                } label: {
+                                                    HStack {
+                                                        Text("😑 Noia")
+                                                        Spacer()
+                                                        Text("pavone_noia").font(.caption2).foregroundStyle(.gray)
+                                                    }
+                                                    .padding(12)
+                                                    .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                                                }
+                                                .buttonStyle(.plain)
+                                                
+                                                Button {
+                                                    vm.life = 10
+                                                    vm.satiety = 10
+                                                    haptic(.soft)
+                                                } label: {
+                                                    HStack {
+                                                        Text("😔 Critico/Triste")
+                                                        Spacer()
+                                                        Text("pavone_triste").font(.caption2).foregroundStyle(.gray)
+                                                    }
+                                                    .padding(12)
+                                                    .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                                                }
+                                                .buttonStyle(.plain)
+                                                
+                                                Button {
+                                                    vm.happiness = 50
+                                                    vm.satiety = 50
+                                                    vm.energy = 50
+                                                    vm.hygiene = 50
+                                                    vm.life = 50
+                                                    haptic(.soft)
+                                                } label: {
+                                                    HStack {
+                                                        Text("😐 Neutro")
+                                                        Spacer()
+                                                        Text("pavone_neutro").font(.caption2).foregroundStyle(.gray)
+                                                    }
+                                                    .padding(12)
+                                                    .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                        .padding(12)
+                                        .background(.ultraThinMaterial.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+                                        
+                                        SettingsNavRow(
+                                            title: "Ripristina Default",
+                                            system: "arrow.counterclockwise.circle.fill",
+                                            tint: .orange
+                                        ) {
+                                            showDefaultsAlert = true
+                                        }
+                                        .alert("Ripristinare i valori di default?", isPresented: $showDefaultsAlert) {
+                                            Button("Annulla", role: .cancel) {}
+                                            Button("Ripristina", role: .destructive) {
+                                                eventChance = 0.35
+                                                cooldownHints = true
+                                                haptic(.medium)
+                                            }
+                                        } message: {
+                                            Text("Reimposta le preferenze di gioco e interfaccia.")
+                                        }
+                                        
+                                        SettingsNavRow(
+                                            title: "Resuscita il Pavone",
+                                            system: "heart.text.square.fill",
+                                            tint: .red
+                                        ) {
+                                            showResetAlert = true
+                                        }
+                                        .alert("Resuscitare e ribilanciare?", isPresented: $showResetAlert) {
+                                            Button("Annulla", role: .cancel) {}
+                                            Button("Conferma", role: .destructive) {
+                                                withAnimation {
+                                                    vm.life = 100
+                                                    vm.satiety = max(vm.satiety, 60)
+                                                    vm.energy = max(vm.energy, 60)
+                                                    vm.hygiene = max(vm.hygiene, 60)
+                                                    vm.happiness = max(vm.happiness, 60)
+                                                }
+                                                haptic(.heavy)
+                                            }
+                                        } message: {
+                                            Text("Porta la Vita a 100 e riallinea le statistiche se sono troppo basse.")
+                                        }
+                                    }
+                                    .padding(.top, 8)
+                                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
                                 }
                             }
                         }
@@ -9961,3 +9971,735 @@ extension PetViewModel {
         self.hasFinishedRun = false
         }
     }
+
+// MARK: - Main ContentView
+struct ContentView: View {
+    @StateObject private var vm = PetViewModel()
+    @State private var selectedTab = 0
+    @EnvironmentObject var minigameManager: MinigameManager
+    @EnvironmentObject var locationManager: LocationManager
+    
+    // Debug menu states
+    @State private var showDebugMenu = false
+    @State private var debugTestBanner = false
+    @State private var debugTestSigla = false
+    @State private var debugTestMinigame = false
+    @State private var debugTestSerata = false
+    @State private var debugTestSerataOmaggio = false
+    @State private var debugClickCount = 0
+    @State private var debugClickTimer: Timer?
+    
+    var body: some View {
+        TabView(selection: $selectedTab) {
+            // H-ZOO Tab
+            HomeTabView(
+                debugTestBanner: $debugTestBanner,
+                debugTestSigla: $debugTestSigla,
+                debugTestMinigame: $debugTestMinigame,
+                debugTestSerata: $debugTestSerata,
+                debugTestSerataOmaggio: $debugTestSerataOmaggio
+            )
+                .tabItem {
+                    Image(systemName: "house.fill")
+                    Text("H-ZOO")
+                }
+                .tag(0)
+                .onTapGesture {
+                    handleDebugClick()
+                }
+            
+            // Tavolo Tab
+            PrenotaTabView()
+                .tabItem {
+                    Image(systemName: "wineglass")
+                    Text("Tavolo")
+                }
+                .tag(1)
+            
+            // Prezzi Tab
+            PrezziView()
+                .tabItem {
+                    Image(systemName: "eurosign.circle.fill")
+                    Text("Prezzi")
+                }
+                .tag(2)
+            
+            // Pavogotchi Tab (era MinigameTabView)
+            MinigameTabView()
+                .tabItem {
+                    Image(systemName: "gamecontroller.fill")
+                    Text("Pavogotchi")
+                }
+                .tag(3)
+            
+        }
+        .environmentObject(vm)
+        .environmentObject(minigameManager)
+        .environmentObject(locationManager)
+        .onReceive(NotificationCenter.default.publisher(for: .switchToTab)) { notification in
+            if let tabIndex = notification.userInfo?["tab"] as? Int {
+                selectedTab = tabIndex
+            }
+        }
+        .sheet(isPresented: $showDebugMenu) {
+            DebugMenuView(
+                debugTestBanner: $debugTestBanner,
+                debugTestSigla: $debugTestSigla,
+                debugTestMinigame: $debugTestMinigame,
+                debugTestSerata: $debugTestSerata,
+                debugTestSerataOmaggio: $debugTestSerataOmaggio
+            )
+            .environmentObject(vm)
+            .environmentObject(minigameManager)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UserEnteredVenue"))) { _ in
+            // Utente entrato nel locale - abilita funzionalità
+            print("📍 Utente entrato nel locale!")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("UserExitedVenue"))) { _ in
+            // Utente uscito dal locale - disabilita funzionalità
+            print("📍 Utente uscito dal locale!")
+        }
+        .onDisappear {
+            // Cleanup timer quando si chiude la view
+            debugClickTimer?.invalidate()
+            debugClickTimer = nil
+        }
+    }
+    
+    // MARK: - Debug Click Handler
+    private func handleDebugClick() {
+        debugClickCount += 1
+        
+        // Reset timer se esiste
+        debugClickTimer?.invalidate()
+        
+        if debugClickCount >= 10 {
+            // 10 click raggiunti - apri debug menu
+            showDebugMenu = true
+            debugClickCount = 0
+            haptic(.heavy)
+        } else {
+            // Haptic feedback per ogni click
+            haptic(.light)
+            
+            // Timer per reset automatico dopo 2 secondi
+            debugClickTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { _ in
+                debugClickCount = 0
+            }
+        }
+    }
+}
+
+
+// MARK: - Prezzi View (Originale Meravigliosa)
+struct PrezziView: View {
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Hero
+                    VStack(spacing: 12) {
+                        Image(systemName: "eurosign.circle.fill")
+                            .font(.system(size: 50))
+                            .foregroundStyle(HZooConfig.primaryNeon)
+                        
+                        Text("Info Prezzi")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(HZooConfig.textWhite)
+                    }
+                    .padding(.top, 24)
+                    
+                    // Prezzi Ingresso
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("💸 Ingresso")
+                            .font(.headline)
+                            .foregroundStyle(HZooConfig.textWhite)
+                        
+                        VStack(spacing: 12) {
+                            priceRow(icon: "👔", title: "Uomo", price: HZooConfig.priceMan, detail: "Valido tutta la notte")
+                            priceRow(icon: "👗", title: "Donna", price: "Omaggio", detail: "Omaggio entro le 00:30, poi 15€")
+                        }
+                        .padding(16)
+                        .background(Color(hex: "1a1a1a"))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    
+                    // Servizi
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("🎫 Servizi")
+                            .font(.headline)
+                            .foregroundStyle(HZooConfig.textWhite)
+                        
+                        VStack(spacing: 12) {
+                            priceRow(icon: "🧥", title: "Guardaroba", price: HZooConfig.priceCoatCheck, detail: "Obbligatorio per giacche e borse")
+                            priceRow(icon: "🍸", title: "Consumazione", price: HZooConfig.priceDrink, detail: "Drink e cocktail")
+                        }
+                        .padding(16)
+                        .background(Color(hex: "1a1a1a"))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    
+                    // Note
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Info Utili", systemImage: "info.circle.fill")
+                            .font(.headline)
+                            .foregroundStyle(HZooConfig.accentCyan)
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            noteRow(text: "Pagamenti: contanti e carte")
+                            noteRow(text: "Ingresso non rimborsabile")
+                            noteRow(text: "Prezzi soggetti a variazioni per eventi speciali")
+                        }
+                        .padding(16)
+                        .background(Color(hex: "1a1a1a"))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 32)
+            }
+            .background(Color.black.ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .onAppear {
+            trackEvent("view_prezzi")
+        }
+    }
+    
+    private func priceRow(icon: String, title: String, price: String, detail: String) -> some View {
+        HStack(spacing: 12) {
+            Text(icon)
+                .font(.title)
+            
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(HZooConfig.textWhite)
+                
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(HZooConfig.textWhite.opacity(0.6))
+            }
+            
+            Spacer()
+            
+            Text(price)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(HZooConfig.primaryNeon)
+        }
+    }
+    
+    private func noteRow(text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("•")
+                .foregroundStyle(HZooConfig.accentCyan)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(HZooConfig.textWhite.opacity(0.85))
+        }
+    }
+}
+
+// MARK: - Impostazioni View
+struct ImpostazioniView: View {
+    @EnvironmentObject var locationManager: LocationManager
+    @State private var showLocationPermissionAlert = false
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Header
+                    VStack(spacing: 12) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 50))
+                            .foregroundStyle(.gray)
+                        
+                        Text("Impostazioni")
+                            .font(.title.bold())
+                            .foregroundStyle(.white)
+                        
+                        Text("Personalizza la tua esperienza")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    .padding(.top, 20)
+                    
+                    // Permessi
+                    ImpostazioniSection(title: "🔐 Permessi", icon: "lock.fill") {
+                        // Posizione
+                        ImpostazioneRow(
+                            title: "Posizione",
+                            subtitle: locationManager.authorizationStatus == .authorizedWhenInUse ? "Autorizzato" : "Non autorizzato",
+                            icon: "location.fill",
+                            color: locationManager.authorizationStatus == .authorizedWhenInUse ? .green : .red,
+                            action: {
+                                locationManager.requestLocationPermission()
+                            }
+                        )
+                        
+                        // Notifiche
+                        ImpostazioneRow(
+                            title: "Notifiche",
+                            subtitle: "Abilita per ricevere promemoria",
+                            icon: "bell.fill",
+                            color: .blue,
+                            action: {
+                                // Richiedi permessi notifiche
+                            }
+                        )
+                    }
+                    
+                    // Geofencing
+                    ImpostazioniSection(title: "📍 Geofencing", icon: "location.circle.fill") {
+                        VStack(spacing: 12) {
+                            HStack {
+                                Image(systemName: locationManager.isNearVenue ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundStyle(locationManager.isNearVenue ? .green : .red)
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Stato Posizione")
+                                        .font(.headline)
+                                        .foregroundStyle(.white)
+                                    
+                                    Text(locationManager.isNearVenue ? "Vicino al locale" : "Lontano dal locale")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.white.opacity(0.7))
+                                }
+                                
+                                Spacer()
+                            }
+                            
+                            if locationManager.distanceToVenue > 0 {
+                                HStack {
+                                    Image(systemName: "ruler")
+                                        .foregroundStyle(.cyan)
+                                    
+                                    Text("Distanza: \(Int(locationManager.distanceToVenue)) metri")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.white.opacity(0.7))
+                                    
+                                    Spacer()
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Info App
+                    ImpostazioniSection(title: "ℹ️ Info", icon: "info.circle.fill") {
+                        VStack(spacing: 12) {
+                            HStack {
+                                Image(systemName: "app.badge")
+                                    .foregroundStyle(.cyan)
+                                
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("El-PavoReal")
+                                        .font(.headline)
+                                        .foregroundStyle(.white)
+                                    
+                                    Text("Versione 1.0 • Build TestFlight")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.white.opacity(0.7))
+                                }
+                                
+                                Spacer()
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 100)
+            }
+            .navigationBarHidden(true)
+        }
+    }
+}
+
+
+// MARK: - Helper Views per Impostazioni
+private struct ImpostazioniSection<Content: View>: View {
+    let title: String
+    let icon: String
+    @ViewBuilder let content: Content
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Image(systemName: icon)
+                    .foregroundStyle(.cyan)
+                    .font(.title2)
+                
+                Text(title)
+                    .font(.title2.bold())
+                    .foregroundStyle(.white)
+                
+                Spacer()
+            }
+            
+            content
+        }
+        .padding(20)
+        .background(Color(hex: "1a1a1a"))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+        )
+        .cornerRadius(16)
+    }
+}
+
+private struct ImpostazioneRow: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let color: Color
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                Image(systemName: icon)
+                    .font(.title2)
+                    .foregroundStyle(color)
+                    .frame(width: 30)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+            .padding(16)
+            .background(Color(hex: "1a1a1a"))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(.white.opacity(0.1), lineWidth: 1)
+            )
+            .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Debug Menu View
+struct DebugMenuView: View {
+    @Binding var debugTestBanner: Bool
+    @Binding var debugTestSigla: Bool
+    @Binding var debugTestMinigame: Bool
+    @Binding var debugTestSerata: Bool
+    @Binding var debugTestSerataOmaggio: Bool
+    
+    @EnvironmentObject var vm: PetViewModel
+    @EnvironmentObject var minigameManager: MinigameManager
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var bannerTimer: Timer?
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                
+                ScrollView {
+                    VStack(spacing: 24) {
+                        // Header
+                        VStack(spacing: 12) {
+                            Image(systemName: "ladybug.fill")
+                                .font(.system(size: 50))
+                                .foregroundStyle(.orange)
+                            
+                            Text("Debug Menu")
+                                .font(.title.bold())
+                                .foregroundStyle(.white)
+                            
+                            Text("Strumenti di sviluppo per testare le funzionalità")
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.7))
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.top, 20)
+                        
+                        // Debug Actions
+                        VStack(spacing: 16) {
+                            DebugButton(
+                                title: "Test Banner Omaggio Donna",
+                                subtitle: "Mostra banner per 1 minuto",
+                                icon: "sparkles",
+                                color: .pink,
+                                isActive: debugTestBanner
+                            ) {
+                                testBanner()
+                            }
+                            
+                            DebugButton(
+                                title: "Test Sigla",
+                                subtitle: "Attiva micro-quote sigla",
+                                icon: "music.note",
+                                color: .blue,
+                                isActive: debugTestSigla
+                            ) {
+                                testSigla()
+                            }
+                            
+                            DebugButton(
+                                title: "Test Minigame",
+                                subtitle: "Attiva minigame di serata",
+                                icon: "gamecontroller.fill",
+                                color: .purple,
+                                isActive: debugTestMinigame
+                            ) {
+                                testMinigame()
+                            }
+                            
+                            DebugButton(
+                                title: "Test Banner Serata",
+                                subtitle: "Mostra banner 'IN SERATA' in alto",
+                                icon: "party.popper.fill",
+                                color: .orange,
+                                isActive: debugTestSerata
+                            ) {
+                                testSerata()
+                            }
+                            
+                            DebugButton(
+                                title: "Test Omaggio Donna Serata",
+                                subtitle: "Omaggio donna durante serata attiva",
+                                icon: "heart.fill",
+                                color: .pink,
+                                isActive: debugTestSerataOmaggio
+                            ) {
+                                testSerataOmaggio()
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        
+                        // Info
+                        VStack(spacing: 8) {
+                            Text("ℹ️ Informazioni")
+                                .font(.headline.bold())
+                                .foregroundStyle(.white)
+                            
+                            Text("Questi test eludono le logiche normali dell'app per permettere il debug durante lo sviluppo.")
+                                .font(.caption)
+                                .foregroundStyle(.white.opacity(0.7))
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(16)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 20)
+                        
+                        Spacer(minLength: 40)
+                    }
+                }
+            }
+            .navigationTitle("Debug")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Chiudi") {
+                        dismiss()
+                    }
+                    .foregroundStyle(.white)
+                }
+            }
+        }
+        .onDisappear {
+            // Cleanup timers quando si chiude il menu
+            bannerTimer?.invalidate()
+            bannerTimer = nil
+        }
+    }
+    
+    private func testBanner() {
+        debugTestBanner.toggle()
+        
+        if debugTestBanner {
+            // Attiva banner per 1 minuto
+            bannerTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: false) { _ in
+                DispatchQueue.main.async {
+                    debugTestBanner = false
+                }
+            }
+            haptic(.medium)
+        } else {
+            // Disattiva immediatamente
+            bannerTimer?.invalidate()
+            bannerTimer = nil
+            haptic(.light)
+        }
+    }
+    
+    private func testSigla() {
+        debugTestSigla.toggle()
+        haptic(.medium)
+    }
+    
+    private func testMinigame() {
+        debugTestMinigame.toggle()
+        haptic(.medium)
+    }
+    
+    private func testSerata() {
+        debugTestSerata.toggle()
+        haptic(.medium)
+    }
+    
+    private func testSerataOmaggio() {
+        debugTestSerataOmaggio.toggle()
+        haptic(.medium)
+    }
+}
+
+// MARK: - Debug Button Component
+private struct DebugButton: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let color: Color
+    let isActive: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(isActive ? color : color.opacity(0.3))
+                        .frame(width: 50, height: 50)
+                    
+                    Image(systemName: icon)
+                        .font(.title2)
+                        .foregroundStyle(isActive ? .white : color)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline.bold())
+                        .foregroundStyle(.white)
+                    
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                
+                Spacer()
+                
+                Image(systemName: isActive ? "checkmark.circle.fill" : "circle")
+                    .font(.title2)
+                    .foregroundStyle(isActive ? color : .white.opacity(0.5))
+            }
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(isActive ? color.opacity(0.1) : Color.black.opacity(0.3))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(isActive ? color : Color.white.opacity(0.2), lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Scroll Offset Preference Key
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+// MARK: - Dynamic Scroll Gradient Overlay
+struct ScrollGradientOverlay: View {
+    let scrollOffset: CGFloat
+    let isEventActive: Bool
+    
+    // Calcola se il contenuto sta scorrendo sotto la Dynamic Island
+    private var shouldShowGradient: Bool {
+        // Il gradiente appare quando il contenuto scorre verso l'alto (scrollOffset < 0)
+        // e si avvicina alla Dynamic Island - soglia più bassa per attivazione più veloce
+        return scrollOffset < -5
+    }
+    
+    // Intensità del gradiente basata su quanto il contenuto è sotto la Dynamic Island
+    private var gradientIntensity: Double {
+        let maxOffset: CGFloat = 40 // Offset più piccolo per gradiente più intenso
+        let clampedOffset = max(-maxOffset, scrollOffset)
+        let intensity = Double(-clampedOffset / maxOffset)
+        return min(1.0, max(0.5, intensity)) // Minimo 50% di opacità quando attivo
+    }
+    
+    var body: some View {
+        // DEBUG: Print per verificare scrollOffset
+        let _ = print("ScrollGradientOverlay - scrollOffset: \(scrollOffset), shouldShow: \(shouldShowGradient), intensity: \(gradientIntensity)")
+        
+        if shouldShowGradient {
+            VStack {
+                // Gradiente sotto Dynamic Island - NERO SOLIDO per nascondere contenuto
+                LinearGradient(
+                    colors: [
+                        Color.black,
+                        Color.black.opacity(0.95),
+                        Color.black.opacity(0.8),
+                        Color.black.opacity(0.5),
+                        Color.clear
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 100)
+                .ignoresSafeArea(.container, edges: .top)
+                
+                // Gradiente sotto banner "Serata in Corso" (se attivo) - Verdolino con blur
+                if isEventActive {
+                    LinearGradient(
+                        colors: [
+                            Color.green.opacity(0.8),
+                            Color.green.opacity(0.5),
+                            Color.green.opacity(0.2),
+                            Color.clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 100)
+                    .blur(radius: 2)
+                    .opacity(gradientIntensity)
+                } else {
+                    // Gradiente nero quando non ci sono banner in alto
+                    LinearGradient(
+                        colors: [
+                            Color.black.opacity(0.95),
+                            Color.black.opacity(0.8),
+                            Color.black.opacity(0.5),
+                            Color.clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 60)
+                    .opacity(gradientIntensity)
+                }
+                
+                
+                Spacer()
+            }
+            .transition(.opacity)
+            .animation(.easeInOut(duration: 0.2), value: shouldShowGradient)
+        }
+    }
+}
+
