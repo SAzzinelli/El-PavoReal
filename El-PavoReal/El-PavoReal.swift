@@ -10,11 +10,13 @@ import SwiftUI
 @main
 struct El_PavoRealApp: App {
     @State private var showSplash = true
+    @StateObject private var minigameManager = MinigameManager.shared
     
     var body: some Scene {
         WindowGroup {
             ZStack {
                 ContentView()
+                    .environmentObject(minigameManager)
                 
                 if showSplash {
                     SplashView()
@@ -29,6 +31,9 @@ struct El_PavoRealApp: App {
                         showSplash = false
                     }
                 }
+                
+                // Fetch configurazione minigame
+                minigameManager.fetchConfigIfNeeded()
             }
         }
     }

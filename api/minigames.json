@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "last_updated": "2025-10-11T14:30:00Z",
+  "event_games": [
+    {
+      "id": "beerpong_week1",
+      "title": "Beer Pong 🍺",
+      "description": "Sfida i tuoi amici al classico beer pong!",
+      "icon": "🍺",
+      "event_numbers": [1],
+      "prizes": "Drink gratis per il vincitore",
+      "start_time": "23:30",
+      "location": "Area Gaming"
+    },
+    {
+      "id": "archery_week2",
+      "title": "Tiro con l'Arco 🏹",
+      "description": "Metti alla prova la tua mira!",
+      "icon": "🎯",
+      "event_numbers": [2],
+      "prizes": "Shot gratis + badge Instagram",
+      "start_time": "00:00",
+      "location": "Zona Outdoor"
+    },
+    {
+      "id": "halloween_week3",
+      "title": "Halloween Challenge 🎃",
+      "description": "Giochi a tema horror e premi misteriosi",
+      "icon": "🎃",
+      "event_numbers": [3],
+      "prizes": "Bottiglia omaggio tavolo vincente",
+      "start_time": "23:45",
+      "location": "Main Floor"
+    },
+    {
+      "id": "karaoke_week4",
+      "title": "Karaoke Battle 🎤",
+      "description": "Canta e vinci con il pubblico che vota",
+      "icon": "🎤",
+      "event_numbers": [4],
+      "prizes": "Playlist dedicata + drink omaggio",
+      "start_time": "00:30",
+      "location": "Stage Principale"
+    },
+    {
+      "id": "limbo_week5",
+      "title": "Limbo Contest 🕺",
+      "description": "Quanto riesci ad abbassarti?",
+      "icon": "🕺",
+      "event_numbers": [5],
+      "prizes": "Ingresso gratis prossima serata",
+      "start_time": "01:00",
+      "location": "Dance Floor"
+    }
+  ],
+  "minigames": [
+    {
+      "id": "slot_machine_v1",
+      "title": "Slot Machine Pavo",
+      "subtitle": "Gira e vinci Pavo Lire!",
+      "active_from": "2025-10-03",
+      "active_until": "2025-10-24",
+      "enabled": true,
+      "event_numbers": [1, 2, 3],
+      "type": "slot_machine",
+      "config": {
+        "icons": ["🦚", "🍸", "💎", "🎉", "🔥"],
+        "bet_amount": 10,
+        "jackpot_multiplier": 50,
+        "double_multiplier": 5,
+        "single_multiplier": 2
+      }
+    },
+    {
+      "id": "roulette_v1",
+      "title": "Roulette Pavo",
+      "subtitle": "Scegli il tuo numero fortunato!",
+      "active_from": "2025-10-25",
+      "active_until": "2025-11-14",
+      "enabled": true,
+      "event_numbers": [4, 5, 6],
+      "type": "roulette",
+      "config": {
+        "min_bet": 5,
+        "max_bet": 100,
+        "payout_multiplier": 35
+      }
+    },
+    {
+      "id": "no_game_break",
+      "title": null,
+      "subtitle": null,
+      "active_from": "2025-11-15",
+      "active_until": "2025-11-21",
+      "enabled": false,
+      "event_numbers": [7],
+      "type": "none",
+      "config": {}
+    },
+    {
+      "id": "scratch_card_v1",
+      "title": "Gratta e Vinci Pavo",
+      "subtitle": "Gratta le carte e scopri i premi!",
+      "active_from": "2025-11-22",
+      "active_until": "2025-12-12",
+      "enabled": true,
+      "event_numbers": [8, 9, 10],
+      "type": "scratch_card",
+      "config": {
+        "card_cost": 20,
+        "prizes": [0, 10, 50, 100, 500]
+      }
+    }
+  ]
+}
+

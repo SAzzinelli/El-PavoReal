@@ -1,20 +1,19 @@
 import SwiftUI
 
 struct SplashView: View {
-    @Environment(\.colorScheme) private var colorScheme
     @State private var appear = false
 
     var body: some View {
         GeometryReader { geo in
             let side = min(geo.size.width, geo.size.height)
-            // responsive ma più grande
-            let targetWidth = max(200, side * 0.5)
+            // Logo più grande - 70% dello schermo invece di 50%
+            let targetWidth = max(250, side * 0.7)
 
             ZStack {
-                Color(.systemBackground)
+                Color.black
                     .ignoresSafeArea()
 
-                Image(colorScheme == .dark ? "logoBianco" : "logoNero")
+                Image("logoBianco")
                     .resizable()
                     .scaledToFit()
                     .frame(width: targetWidth)

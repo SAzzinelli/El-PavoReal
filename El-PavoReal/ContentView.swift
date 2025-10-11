@@ -6,10 +6,479 @@
 //  Created by Simone Azzinelli on 23/08/25.
 
 import SwiftUI
+
+extension Notification.Name {
+    static let switchToTab = Notification.Name("switchToTab")
+}
+
+// MARK: - 🎬 Local Video Models
+struct LocalVideo: Identifiable {
+    let id: String
+    let title: String
+    let videoName: String // Nome del file video in Assets
+    let thumbnailName: String // Nome dell'immagine thumbnail in Assets
+    let type: VideoType
+    
+    enum VideoType {
+        case aftermovie
+        case tiktok
+    }
+}
+
+// MARK: - 🎮 Minigame Dynamic Configuration
+
+// Models
+struct MinigamesConfig: Codable {
+    let version: Int
+    let lastUpdated: String
+    let eventGames: [EventGame]?
+    let minigames: [MinigameConfig]
+    
+    enum CodingKeys: String, CodingKey {
+        case version
+        case lastUpdated = "last_updated"
+        case eventGames = "event_games"
+        case minigames
+    }
+}
+
+struct EventGame: Codable, Identifiable {
+    let id: String
+    let title: String
+    let description: String
+    let icon: String
+    let eventNumbers: [Int]
+    let prizes: String
+    let startTime: String
+    let location: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id, title, description, icon, prizes, location
+        case eventNumbers = "event_numbers"
+        case startTime = "start_time"
+    }
+}
+
+struct MinigameConfig: Codable, Identifiable {
+    let id: String
+    let title: String?
+    let subtitle: String?
+    let activeFrom: String
+    let activeUntil: String
+    let enabled: Bool
+    let eventNumbers: [Int]
+    let type: MinigameType
+    let config: MinigameSpecificConfig
+    
+    enum CodingKeys: String, CodingKey {
+        case id, title, subtitle, enabled, type, config
+        case activeFrom = "active_from"
+        case activeUntil = "active_until"
+        case eventNumbers = "event_numbers"
+    }
+    
+    enum MinigameType: String, Codable {
+        case slotMachine = "slot_machine"
+        case roulette = "roulette"
+        case scratchCard = "scratch_card"
+        case none = "none"
+    }
+}
+
+struct MinigameSpecificConfig: Codable {
+    // Slot Machine
+    let icons: [String]?
+    let betAmount: Int?
+    let jackpotMultiplier: Int?
+    let doubleMultiplier: Int?
+    let singleMultiplier: Int?
+    
+    // Roulette
+    let minBet: Int?
+    let maxBet: Int?
+    let payoutMultiplier: Int?
+    
+    // Scratch Card
+    let cardCost: Int?
+    let prizes: [Int]?
+    
+    enum CodingKeys: String, CodingKey {
+        case icons
+        case betAmount = "bet_amount"
+        case jackpotMultiplier = "jackpot_multiplier"
+        case doubleMultiplier = "double_multiplier"
+        case singleMultiplier = "single_multiplier"
+        case minBet = "min_bet"
+        case maxBet = "max_bet"
+        case payoutMultiplier = "payout_multiplier"
+        case cardCost = "card_cost"
+        case prizes
+    }
+}
+
+// Manager
+class MinigameManager: ObservableObject {
+    static let shared = MinigameManager()
+    
+    @Published var currentMinigame: MinigameConfig?
+    @Published var currentEventGame: EventGame?
+    @Published var isLoading = false
+    @Published var lastError: String?
+    
+    // IMPORTANTE: Sostituisci con il tuo username GitHub
+    private let remoteURL = "https://SAzzinelli.github.io/El-PavoReal/api/minigames.json"
+    private let cacheKey = "El-PavoReal.minigamesCache"
+    private let lastFetchKey = "El-PavoReal.lastMinigameFetch"
+    
+    private init() {
+        loadCachedConfig()
+    }
+    
+    // MARK: - Public Methods
+    
+    /// Fetch configurazione remota (con cache 24h)
+    func fetchConfigIfNeeded() {
+        let lastFetch = UserDefaults.standard.double(forKey: lastFetchKey)
+        let now = Date().timeIntervalSince1970
+        let dayInSeconds: Double = 86400
+        
+        // Se è passato più di 1 giorno (o mai fatto), fetch
+        if now - lastFetch > dayInSeconds || lastFetch == 0 {
+            fetchRemoteConfig()
+        } else {
+            print("🎮 MinigameManager: Cache valida, skip fetch")
+        }
+    }
+    
+    /// Forza fetch remoto (per debug/refresh manuale)
+    func forceRefresh() {
+        fetchRemoteConfig()
+    }
+    
+    /// Ottieni minigame attivo per evento specifico
+    func getMinigameForEvent(_ eventNumber: Int) -> MinigameConfig? {
+        guard let cached = loadCachedData() else { return nil }
+        
+        // Trova minigame che contiene questo numero evento
+        return cached.minigames.first { minigame in
+            minigame.eventNumbers.contains(eventNumber) && minigame.enabled
+        }
+    }
+    
+    /// Ottieni minigame attivo per data
+    func getMinigameForDate(_ date: Date) -> MinigameConfig? {
+        guard let cached = loadCachedData() else { return nil }
+        
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        
+        return cached.minigames.first { minigame in
+            guard minigame.enabled,
+                  let from = formatter.date(from: minigame.activeFrom),
+                  let until = formatter.date(from: minigame.activeUntil) else {
+                return false
+            }
+            return date >= from && date <= until
+        }
+    }
+    
+    // MARK: - Private Methods
+    
+    private func fetchRemoteConfig() {
+        guard let url = URL(string: remoteURL) else {
+            lastError = "URL non valido"
+            return
+        }
+        
+        isLoading = true
+        lastError = nil
+        
+        print("🎮 MinigameManager: Fetching da \(remoteURL)")
+        
+        URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.isLoading = false
+                
+                if let error = error {
+                    self?.lastError = error.localizedDescription
+                    print("❌ MinigameManager: Errore fetch - \(error)")
+                    return
+                }
+                
+                guard let data = data else {
+                    self?.lastError = "Nessun dato ricevuto"
+                    print("❌ MinigameManager: Nessun dato")
+                    return
+                }
+                
+                do {
+                    let config = try JSONDecoder().decode(MinigamesConfig.self, from: data)
+                    self?.saveToCache(data)
+                    self?.updateCurrentMinigame(from: config)
+                    UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: self?.lastFetchKey ?? "")
+                    print("✅ MinigameManager: Config aggiornata (v\(config.version))")
+                } catch {
+                    self?.lastError = "Errore parsing JSON: \(error)"
+                    print("❌ MinigameManager: Parsing fallito - \(error)")
+                }
+            }
+        }.resume()
+    }
+    
+    private func loadCachedConfig() {
+        guard let config = loadCachedData() else {
+            print("⚠️ MinigameManager: Nessuna cache trovata")
+            return
+        }
+        updateCurrentMinigame(from: config)
+        print("✅ MinigameManager: Cache caricata (v\(config.version))")
+    }
+    
+    private func loadCachedData() -> MinigamesConfig? {
+        guard let data = UserDefaults.standard.data(forKey: cacheKey) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(MinigamesConfig.self, from: data)
+    }
+    
+    private func saveToCache(_ data: Data) {
+        UserDefaults.standard.set(data, forKey: cacheKey)
+    }
+    
+    private func updateCurrentMinigame(from config: MinigamesConfig) {
+        // Calcola numero evento corrente
+        let eventNumber = HZooConfig.eventNumber(for: Date())
+        
+        // Trova minigame attivo per questo evento
+        currentMinigame = config.minigames.first { minigame in
+            minigame.eventNumbers.contains(eventNumber) && minigame.enabled
+        }
+        
+        // Trova gioco della serata attivo per questo evento
+        currentEventGame = config.eventGames?.first { game in
+            game.eventNumbers.contains(eventNumber)
+        }
+        
+        if let current = currentMinigame {
+            print("🎮 Minigame attivo: \(current.title ?? "none") (tipo: \(current.type.rawValue))")
+        } else {
+            print("🎮 Nessun minigame attivo questa settimana")
+        }
+        
+        if let eventGame = currentEventGame {
+            print("🎯 Gioco serata: \(eventGame.title) alle \(eventGame.startTime)")
+        } else {
+            print("🎯 Nessun gioco della serata configurato")
+        }
+    }
+}
+
+// MARK: - 🎬 Local Video Player
+import AVKit
+
+struct LocalVideoPlayerView: View {
+    let video: LocalVideo
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer?
+    
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            
+            if let player = player {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+            }
+            
+            VStack {
+                HStack {
+                    Button("Chiudi") {
+                        player?.pause()
+                        dismiss()
+                    }
+                    .foregroundStyle(.white)
+                    .padding()
+                    
+                    Spacer()
+                }
+                
+                Spacer()
+            }
+        }
+        .onAppear {
+            // Carica il video dal bundle
+            if let videoURL = Bundle.main.url(forResource: video.videoName, withExtension: "mp4") {
+                print("✅ Video trovato: \(video.videoName).mp4")
+                print("📁 URL: \(videoURL)")
+                player = AVPlayer(url: videoURL)
+                player?.play()
+                
+                // Debug: controlla se il player è valido
+                if player == nil {
+                    print("❌ Errore: AVPlayer non inizializzato per \(video.videoName)")
+                } else {
+                    print("✅ AVPlayer inizializzato correttamente per \(video.videoName)")
+                }
+            } else {
+                // Debug: mostra tutti i file disponibili nel bundle
+                print("❌ Video non trovato: \(video.videoName).mp4")
+                print("📁 File disponibili nel bundle:")
+                
+                if let resourcePath = Bundle.main.resourcePath {
+                    let fileManager = FileManager.default
+                    do {
+                        let files = try fileManager.contentsOfDirectory(atPath: resourcePath)
+                        let videoFiles = files.filter { $0.hasSuffix(".mp4") }
+                        print("🎬 Video trovati: \(videoFiles)")
+                        
+                        // Controlla se il file esiste ma con nome diverso
+                        let matchingFiles = files.filter { $0.lowercased().contains(video.videoName.lowercased()) }
+                        if !matchingFiles.isEmpty {
+                            print("🔍 File simili trovati: \(matchingFiles)")
+                        }
+                    } catch {
+                        print("❌ Errore lettura bundle: \(error)")
+                    }
+                }
+            }
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
+        }
+    }
+}
+
 import Combine
 import UIKit
 import UserNotifications
 
+// MARK: - 🦩 H-ZOO Configuration
+/// Configurazione centralizzata per la serata H-ZOO
+struct HZooConfig {
+    // Event Info
+    static let eventName = "H-ZOO"
+    static let eventTagline = "il venerdì del pavoreal"
+    static let venueName = "El-Pavoreal"
+    static let venueLocation = ""
+    static let venueFullAddress = "Via di Pulicciano 53, Antella (BAGNO A RIPOLI - FIRENZE)"
+    
+    // Timing (Europe/Rome timezone)
+    static let eventDay = 6 // Venerdì (1=Domenica, 7=Sabato secondo Calendar gregoriano standard)
+    static let eventStartHour = 23
+    static let eventStartMinute = 0
+    static let eventEndHour = 5 // Sabato mattina
+    static let ladiesDeadlineHour = 0 // Sabato
+    static let ladiesDeadlineMinute = 30
+    
+    // Prezzi
+    static let priceMan = "15€"
+    static let priceLadyBefore = "Omaggio"
+    static let priceLadyAfter = "15€"
+    static let priceCoatCheck = "3€"
+    static let priceDrink = "8€"
+    
+    // Contatti
+    static let phoneNumber = "+393341812814"
+    static let whatsappNumber = "393341812814"
+    static let emailAddress = "info@elpavoreal.it"
+    static let instagramURL = "https://instagram.com/hzoo_official"
+    static let tiktokURL = "https://www.tiktok.com/@elpavorealofficial"
+    
+    // Video Locali
+    static let videos: [LocalVideo] = [
+        LocalVideo(
+            id: "aftermovie1",
+            title: "AFTERMOVIE #1",
+            videoName: "aftermovie1", // File: aftermovie1.mp4 in Assets
+            thumbnailName: "aftermovie1_thumb", // File: aftermovie1_thumb.jpg/png in Assets
+            type: .aftermovie
+        ),
+        LocalVideo(
+            id: "tiktok1",
+            title: "EP.1 - L'APERTURA",
+            videoName: "tiktok1", // File: tiktok1.mp4 in Assets
+            thumbnailName: "tiktok1_thumb", // File: tiktok1_thumb.jpg/png in Assets
+            type: .tiktok
+        )
+    ]
+    
+    // KPI (opzionali - nil per nascondere)
+    static var estimatedPeakTime: String? = nil
+    static var estimatedOccupancy: Int? = nil
+    static var tablesLeft: Int? = nil
+    static var weatherInfo: String? = nil
+    
+    // Stile (palette dark/neon)
+    static let backgroundDark = Color(hex: "0b0b0c")
+    static let primaryNeon = Color(hex: "ff2d95") // Fucsia
+    static let accentCyan = Color(hex: "00ffd1")  // Cyan
+    static let textWhite = Color.white
+    
+    // Timezone
+    static let timezone = TimeZone(identifier: "Europe/Rome")!
+    static var calendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = timezone
+        return cal
+    }
+    
+    // Counter serate (prima serata: venerdì 3 ottobre 2025 = #1)
+    static let firstEventDate: Date = {
+        var components = DateComponents()
+        components.year = 2025
+        components.month = 10
+        components.day = 3
+        components.hour = 23
+        components.minute = 0
+        components.timeZone = timezone
+        return calendar.date(from: components)!
+    }()
+    
+    static func eventNumber(for date: Date) -> Int {
+        let weeksBetween = calendar.dateComponents([.weekOfYear], from: firstEventDate, to: date).weekOfYear ?? 0
+        return max(1, weeksBetween + 1)
+    }
+    
+    // Colori dinamici per serate
+    static func eventColor(for eventNumber: Int) -> Color {
+        let colors: [Color] = [
+            Color(hex: "ff2d95"), // Rosa (serata #1)
+            Color(hex: "00ffd1"), // Cyan (serata #2)
+            Color(hex: "ff6b35"), // Arancione (serata #3)
+            Color(hex: "8e44ad"), // Viola (serata #4)
+            Color(hex: "e74c3c"), // Rosso (serata #5)
+            Color(hex: "f39c12"), // Giallo (serata #6)
+            Color(hex: "1abc9c"), // Turchese (serata #7)
+            Color(hex: "9b59b6"), // Lavanda (serata #8)
+        ]
+        return colors[(eventNumber - 1) % colors.count]
+    }
+}
+
+// Extension per Color da hex
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let r, g, b: UInt64
+        switch hex.count {
+        case 3: // RGB (12-bit)
+            (r, g, b) = ((int >> 8) * 17, (int >> 4 & 0xF) * 17, (int & 0xF) * 17)
+        case 6: // RGB (24-bit)
+            (r, g, b) = (int >> 16, int >> 8 & 0xFF, int & 0xFF)
+        default:
+            (r, g, b) = (0, 0, 0)
+        }
+        self.init(.sRGB, red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255, opacity: 1)
+    }
+}
+
+// Analytics tracking helper
+func trackEvent(_ name: String, params: [String: Any] = [:]) {
+    print("📊 Event: \(name)", params.isEmpty ? "" : "→ \(params)")
+}
 
 // Global haptic helper (disponibile ovunque nel file)
 @inline(__always)
@@ -157,7 +626,7 @@ final class PetViewModel: ObservableObject {
     @Published var hygiene: Double
     @Published var happiness: Double
     @Published var isForeground: Bool = true
-    @Published var slotWinChance: Double = 0.01
+    @Published var slotWinChance: Double = 0.01 // 1% = 1 su 100 (uguale per tutti i minigame "maglietta")
     
     // Meta
     @Published var ageSeconds: Int
@@ -949,11 +1418,12 @@ let extraShopItems: [ShopItem] = [
 ]
 
 // MARK: - Settings model
-struct SettingsModel {
+class SettingsModel: ObservableObject {
     @AppStorage("El-PavoReal.hapticsEnabled") var hapticsEnabled: Bool = true
     @AppStorage("El-PavoReal.eventChance") var eventChance: Double = 0.08
     @AppStorage("El-PavoReal.compactPadding") var compactPadding: Bool = true
     @AppStorage("El-PavoReal.reduceMotion") var reduceMotion: Bool = false
+    @AppStorage("user_gender_preference") var userGenderPreference: String = "maschio"
 }
 
 // MARK: - Helper Components for New Tabs
@@ -1277,364 +1747,1572 @@ struct KPICard: View {
 // MARK: - Main App with Tabs
 struct ContentView: View {
     @StateObject private var vm = PetViewModel()
-    @State private var selectedTab = 2 // Solo Minigame per ora
+    @State private var selectedTab = 0 // Parte da H-ZOO Home
     
     var body: some View {
-        // TEMPORANEO: Solo Minigame attivo, altre tab disabilitate ma non eliminate
         TabView(selection: $selectedTab) {
-            // Tab 1: Home - DISABILITATA
-            /*
+            // Tab 1: H-ZOO Home
             HomeTabView()
                 .tabItem {
-                    Image(systemName: "house.fill")
-                    Text("Home")
+                    Label("H-ZOO", systemImage: "party.popper.fill")
                 }
                 .tag(0)
-            */
             
-            // Tab 2: H-ZOO - DISABILITATA
-            /*
-            HZooTabView()
+            // Tab 2: Tavolo
+            PrenotaTabView()
                 .tabItem {
-                    Image(systemName: "party.popper.fill")
-                    Text("H-ZOO")
+                    Label("Tavolo", systemImage: "wineglass")
                 }
                 .tag(1)
-            */
             
-            // Tab 3: Minigame - ATTIVO
+            // Tab 3: Prezzi
+            PrezziView()
+                .tabItem {
+                    Label("Prezzi", systemImage: "eurosign.circle")
+                }
+                .tag(2)
+            
+            // Tab 4: Minigame
             MinigameTabView()
                 .environmentObject(vm)
                 .tabItem {
-                    Image(systemName: "gamecontroller.fill")
-                    Text("Minigame")
+                    Label("Minigame", systemImage: "gamecontroller.fill")
                 }
-                .tag(2)
+                .tag(3)
         }
-        .accentColor(.white)
+        .tint(HZooConfig.primaryNeon)
+        .onReceive(NotificationCenter.default.publisher(for: .switchToTab)) { notification in
+            if let tabIndex = notification.object as? Int {
+                selectedTab = tabIndex
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            // Quando l'app torna in foreground (da notifica), vai al minigame
+            selectedTab = 3 // Tab Minigame
+        }
     }
 }
 
-// MARK: - 🦚 El PavoReal Tab (Locale principale - Eleganza & After Dinner)
+// MARK: - H-ZOO Countdown ViewModel
+class HZooCountdownViewModel: ObservableObject {
+    @Published var days = 0
+    @Published var hours = 0
+    @Published var minutes = 0
+    @Published var seconds = 0
+    @Published var isEventActive = false
+    @Published var showLadiesFreeBadge = false
+    @Published var showSiglaQuote = false // 1:30-2:00
+    @Published var elapsedMinutes = 0
+    @Published var ladiesCountdown = ""
+    @Published var nextEventDateString = ""
+    @Published var nextEventFullDateString = "" // "Venerdì 10 Ottobre"
+    @Published var nextEventNumber = 1 // "#1"
+    @Published var accessibilityLabel = ""
+    
+    private var timer: Timer?
+    private let cal = HZooConfig.calendar
+    
+    init() {
+        recalculate()
+        startTimer()
+    }
+    
+    deinit {
+        timer?.invalidate()
+    }
+    
+    func startTimer() {
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.recalculate()
+        }
+    }
+    
+    func recalculate() {
+        let now = Date()
+        
+        // Calcola la prossima serata venerdì 23:00
+        let nextEventDate = calculateNextEvent(from: now)
+        
+        // Verifica se la serata è in corso (venerdì 23:00 - sabato 05:00)
+        let eventStart = getEventStartTime(for: now)
+        let eventEnd = getEventEndTime(for: now)
+        
+        if now >= eventStart && now < eventEnd {
+            // Serata in corso
+            isEventActive = true
+            let elapsed = Int(now.timeIntervalSince(eventStart))
+            elapsedMinutes = elapsed / 60
+            
+            // Verifica badge omaggio donna (fino alle 00:30 del sabato)
+            let ladiesDeadline = getLadiesDeadline(for: now)
+            if now < ladiesDeadline {
+                showLadiesFreeBadge = true
+                let remaining = Int(ladiesDeadline.timeIntervalSince(now))
+                let mins = (remaining / 60) % 60
+                let secs = remaining % 60
+                ladiesCountdown = String(format: "%02d:%02d", mins, secs)
+            } else {
+                showLadiesFreeBadge = false
+            }
+            
+            // Verifica micro-quote sigla (sabato 1:30-2:00)
+            let nowComponents = cal.dateComponents([.hour, .minute], from: now)
+            let currentHour = nowComponents.hour ?? 0
+            let currentMinute = nowComponents.minute ?? 0
+            let currentWeekday = cal.component(.weekday, from: now)
+            
+            // Sabato (7) tra 1:30 e 2:00
+            if currentWeekday == 7 && currentHour == 1 && currentMinute >= 30 {
+                showSiglaQuote = true
+            } else if currentWeekday == 7 && currentHour == 2 && currentMinute == 0 {
+                showSiglaQuote = true
+            } else {
+                showSiglaQuote = false
+            }
+            
+            accessibilityLabel = "Serata in corso. Trascorsi \(elapsedMinutes) minuti"
+        } else {
+            // Countdown al prossimo evento
+            isEventActive = false
+            showLadiesFreeBadge = false
+            showSiglaQuote = false
+            
+            let interval = Int(nextEventDate.timeIntervalSince(now))
+            days = interval / 86400
+            hours = (interval % 86400) / 3600
+            minutes = (interval % 3600) / 60
+            seconds = interval % 60
+            
+            // Formatta data per display (senza giorno della settimana)
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "it_IT")
+            formatter.timeZone = HZooConfig.timezone
+            formatter.dateFormat = "d MMM · HH:mm"
+            nextEventDateString = formatter.string(from: nextEventDate)
+            
+            // Formatta data estesa (senza giorno della settimana)
+            let fullFormatter = DateFormatter()
+            fullFormatter.locale = Locale(identifier: "it_IT")
+            fullFormatter.timeZone = HZooConfig.timezone
+            fullFormatter.dateFormat = "d MMMM"
+            nextEventFullDateString = fullFormatter.string(from: nextEventDate).capitalized
+            
+            // Calcola numero serata
+            nextEventNumber = HZooConfig.eventNumber(for: nextEventDate)
+            
+            accessibilityLabel = "Mancano \(days) giorni, \(hours) ore, \(minutes) minuti al prossimo H-ZOO"
+        }
+    }
+    
+    func calculateNextEvent(from date: Date) -> Date {
+        var components = cal.dateComponents([.year, .month, .day, .weekday, .hour, .minute], from: date)
+        
+        let currentWeekday = components.weekday ?? 1
+        let currentHour = components.hour ?? 0
+        let currentMinute = components.minute ?? 0
+        
+        // Venerdì è weekday 6 nel gregoriano (1=Dom, 2=Lun, ..., 6=Ven, 7=Sab)
+        let fridayWeekday = 6
+        
+        var targetDate: Date
+        
+        if currentWeekday == fridayWeekday {
+            // Oggi è venerdì
+            if currentHour < HZooConfig.eventStartHour || (currentHour == HZooConfig.eventStartHour && currentMinute < HZooConfig.eventStartMinute) {
+                // Prima delle 23:00 → target oggi
+                components.hour = HZooConfig.eventStartHour
+                components.minute = HZooConfig.eventStartMinute
+                components.second = 0
+                targetDate = cal.date(from: components)!
+            } else {
+                // Dopo le 23:00 → prossimo venerdì
+                targetDate = nextFriday(after: date)
+            }
+        } else {
+            // Non è venerdì → trova il prossimo venerdì
+            targetDate = nextFriday(after: date)
+        }
+        
+        return targetDate
+    }
+    
+    private func nextFriday(after date: Date) -> Date {
+        var components = DateComponents()
+        components.weekday = 6 // Venerdì
+        components.hour = HZooConfig.eventStartHour
+        components.minute = HZooConfig.eventStartMinute
+        components.second = 0
+        
+        let nextDate = cal.nextDate(after: date, matching: components, matchingPolicy: .nextTime)!
+        return nextDate
+    }
+    
+    private func getEventStartTime(for date: Date) -> Date {
+        var components = cal.dateComponents([.year, .month, .day, .weekday], from: date)
+        let currentWeekday = components.weekday ?? 1
+        
+        // Se oggi è sabato mattina presto (prima delle 05:00), l'evento è iniziato venerdì sera
+        if currentWeekday == 7 { // Sabato
+            let hour = cal.component(.hour, from: date)
+            if hour < HZooConfig.eventEndHour {
+                // Torna a venerdì sera
+                components.day! -= 1
+            } else {
+                // Evento finito, cerca venerdì scorso per evitare match
+                return date.addingTimeInterval(-100000)
+            }
+        } else if currentWeekday != 6 {
+            // Non venerdì/sabato → nessun evento attivo
+            return date.addingTimeInterval(-100000)
+        }
+        
+        components.hour = HZooConfig.eventStartHour
+        components.minute = HZooConfig.eventStartMinute
+        components.second = 0
+        return cal.date(from: components) ?? date
+    }
+    
+    private func getEventEndTime(for date: Date) -> Date {
+        let startTime = getEventStartTime(for: date)
+        guard startTime < date else { return date }
+        
+        // L'evento finisce sabato mattina alle 05:00
+        var endComponents = cal.dateComponents([.year, .month, .day], from: startTime)
+        endComponents.day! += 1  // Passa a sabato
+        endComponents.hour = HZooConfig.eventEndHour
+        endComponents.minute = 0
+        endComponents.second = 0
+        
+        return cal.date(from: endComponents) ?? date
+    }
+    
+    private func getLadiesDeadline(for date: Date) -> Date {
+        let startTime = getEventStartTime(for: date)
+        guard startTime < date else { return date }
+        
+        // Scadenza sabato 00:30
+        var deadlineComponents = cal.dateComponents([.year, .month, .day], from: startTime)
+        deadlineComponents.day! += 1  // Passa a sabato
+        deadlineComponents.hour = HZooConfig.ladiesDeadlineHour
+        deadlineComponents.minute = HZooConfig.ladiesDeadlineMinute
+        deadlineComponents.second = 0
+        
+        return cal.date(from: deadlineComponents) ?? date
+    }
+}
+
+// MARK: - 🦩 H-ZOO Home Tab (Countdown & Info Serata)
 struct HomeTabView: View {
+    @StateObject private var countdownVM = HZooCountdownViewModel()
+    @StateObject private var settings = SettingsModel()
+    @EnvironmentObject var minigameManager: MinigameManager
+    @State private var selectedVideo: LocalVideo?
+    @State private var scrollOffset: CGFloat = 0
+    @State private var timerGlow = false
+    @Environment(\.scenePhase) private var scenePhase
+    
+    // Messaggio dinamico basato su genere iOS
+    private var dynamicMotivationalMessage: String {
+        let gender = settings.userGenderPreference == "femmina" ? "pronta" : "pronto"
+        return "🎉 \(gender) ad alzare la voce? 🦚"
+    }
+    
     var body: some View {
         NavigationStack {
-            List {
-                // Hero Section
-                Section {
-                    VStack(spacing: 12) {
-                        Image(systemName: "bird.fill")
-                            .font(.system(size: 50))
-                            .foregroundStyle(.purple)
+            ZStack(alignment: .top) {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 20) {
+                        // Spacer per banner se presente
+                        if countdownVM.isEventActive {
+                            Color.clear.frame(height: 64)
+                        }
                         
-                        Text("EL PAVO‑REAL")
-                            .font(.system(size: 28, weight: .bold, design: .serif))
-                            .tracking(1.5)
+                        // Hero Section
+                        heroSection
+                            .padding(.top, countdownVM.isEventActive ? 0 : 8)
                         
-                        Text("After Dinner Club")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .textCase(.uppercase)
+                        
+                        // Evento Questo Venerdì (se siamo prima della serata)
+                        if !countdownVM.isEventActive {
+                            thisWeekEventSection
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                        
+                        // Micro-quote (solo 1:30-2:00 durante serata)
+                        if countdownVM.showSiglaQuote {
+                            siglaQuoteSection
+                                .transition(.scale.combined(with: .opacity))
+                        }
+                        
+                        // Minigame placeholder (durante serata)
+                        if countdownVM.isEventActive {
+                            minigameSection
+                                .transition(.move(edge: .leading).combined(with: .opacity))
+                        }
+                        
+                        // Countdown o Stato Serata
+                        countdownSection
+                        
+                        // NUOVO: Gioco della Serata
+                        if let eventGame = minigameManager.currentEventGame {
+                            eventGameCard(eventGame)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                        
+                        // Omaggio Donna (solo venerdì sera)
+                        if countdownVM.showLadiesFreeBadge {
+                            ladiesFreeCard
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
+                        
+                        // KPI Quick Actions
+                        kpiQuickActionsSection
+                        
+                        // Instagram Feed
+                        instagramSection
+                        
+                        // Social Media
+                        contactsSection
+                        
+                        // Preparati per il Prossimo Venerdì
+                        nextWeekEventSection
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 40)
                 }
-                .listRowBackground(Color.clear)
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: countdownVM.isEventActive)
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: countdownVM.showSiglaQuote)
                 
-                // Prossime Serate
-                Section("Prossime Serate") {
-                    NavigationLink {
-                        Text("Dettagli Sabato Night")
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Sabato Night")
-                                .font(.headline)
-                            Text("Ogni Sabato • 22:00 - 05:00")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    NavigationLink {
-                        Text("Dettagli Domenica Aperitivo")
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Domenica Aperitivo")
-                                .font(.headline)
-                            Text("Ogni Domenica • 18:00 - 23:00")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                
-                // Gallery
-                Section("Gallery") {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(0..<5) { _ in
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.gray.opacity(0.3))
-                                    .frame(width: 150, height: 100)
-                                    .overlay(
-                                        Image(systemName: "photo")
-                                            .foregroundStyle(.gray)
-                                    )
-                            }
-                        }
-                        .padding(.vertical, 8)
-                    }
-                    .listRowInsets(EdgeInsets())
-                }
-                
-                // Drink Menu
-                Section("Drink Menu") {
-                    HStack {
-                        Image(systemName: "sparkles")
-                            .foregroundStyle(.purple)
-                        VStack(alignment: .leading) {
-                            Text("Signature Cocktail")
-                            Text("15€")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    HStack {
-                        Image(systemName: "flame.fill")
-                            .foregroundStyle(.orange)
-                        VStack(alignment: .leading) {
-                            Text("Premium Spirits")
-                            Text("12€")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    HStack {
-                        Image(systemName: "star.fill")
-                            .foregroundStyle(.yellow)
-                        VStack(alignment: .leading) {
-                            Text("Champagne Selection")
-                            Text("80€")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                
-                // Info & Contatti
-                Section("Info & Contatti") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("El Pavo‑Real è l'after dinner club che ridefinisce la nightlife elegante. Atmosfera esclusiva, cocktail d'autore e musica selezionata.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    HStack {
-                        Image(systemName: "mappin.circle.fill")
-                            .foregroundStyle(.red)
-                        Text("Via Milano, 123 - Milano")
-                    }
-                    
-                    HStack {
-                        Image(systemName: "phone.fill")
-                            .foregroundStyle(.green)
-                        Text("+39 02 1234 5678")
-                    }
-                    
-                    HStack {
-                        Image(systemName: "envelope.fill")
-                            .foregroundStyle(.blue)
-                        Text("info@el-pavoreal.com")
-                    }
+                // Banner "Serata in Corso" (sempre visibile in alto se attivo)
+                if countdownVM.isEventActive {
+                    serataInCorsoBanner
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
-            .navigationTitle("El Pavo‑Real")
-            .navigationBarTitleDisplayMode(.large)
+            .background(Color.black.ignoresSafeArea())
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                countdownVM.recalculate()
+            }
+        }
+        .onAppear {
+            trackEvent("view_home")
+        }
+        .sheet(item: $selectedVideo) { video in
+            LocalVideoPlayerView(video: video)
+        }
+    }
+    
+    // MARK: - Banner Serata in Corso
+    private var serataInCorsoBanner: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(HZooConfig.primaryNeon)
+                .frame(width: 10, height: 10)
+                .modifier(PulsingDot())
+            
+            Text("SERATA IN CORSO")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(HZooConfig.textWhite)
+            
+            Spacer()
+            
+            if countdownVM.showLadiesFreeBadge {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.caption)
+                    Text("Omaggio ♀ scade tra \(countdownVM.ladiesCountdown)")
+                        .font(.caption.weight(.medium))
+                }
+                .foregroundStyle(HZooConfig.accentCyan)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(
+            Rectangle()
+                .fill(HZooConfig.primaryNeon.opacity(0.15))
+                .overlay(
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [HZooConfig.primaryNeon.opacity(0.3), .clear],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                )
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(HZooConfig.primaryNeon)
+                .frame(height: 1)
+        }
+    }
+    
+    // MARK: - Hero
+    private var heroSection: some View {
+        VStack(spacing: 8) {
+            Image("hzoo_bianco")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: 60)
+                .shadow(color: HZooConfig.primaryNeon.opacity(0.3), radius: 8, x: 0, y: 4)
+            
+            Text("Il venerdì del PavoReal")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+    }
+    
+    // MARK: - Sigla Quote (1:30-2:00)
+    private var siglaQuoteSection: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "music.note")
+                    .foregroundStyle(HZooConfig.accentCyan)
+                Text("È L'ORA DELLA SIGLA!")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(HZooConfig.textWhite.opacity(0.7))
+            }
+            
+            Text("SIGLAAAA! Alza la voce e canta insieme a noiii")
+                .font(.headline)
+                .foregroundStyle(HZooConfig.textWhite)
+                .multilineTextAlignment(.center)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(HZooConfig.accentCyan.opacity(0.1))
+        )
+    }
+    
+    // MARK: - Minigame Serata (Dinamico)
+    private var minigameSection: some View {
+        HStack(spacing: 12) {
+            // Icona dinamica o default
+            if let eventGame = minigameManager.currentEventGame {
+                Text(eventGame.icon)
+                    .font(.system(size: 32))
+            } else {
+                Image(systemName: "gamecontroller.fill")
+                    .font(.title2)
+                    .foregroundStyle(HZooConfig.accentCyan)
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Gioco di Stasera")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(HZooConfig.textWhite.opacity(0.7))
+                
+                // Titolo dinamico
+                Text(minigameManager.currentEventGame?.title ?? "Beerpong del Pavone!")
+                    .font(.headline)
+                    .foregroundStyle(HZooConfig.textWhite)
+            }
+            
+            Spacer()
+            
+            // Orario
+            if let eventGame = minigameManager.currentEventGame {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Image(systemName: "clock.fill")
+                        .font(.caption)
+                        .foregroundStyle(HZooConfig.accentCyan)
+                    Text(eventGame.startTime)
+                        .font(.caption.bold())
+                        .foregroundStyle(HZooConfig.textWhite)
+                }
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(HZooConfig.accentCyan.opacity(0.1))
+        )
+    }
+    
+    // MARK: - Evento Questo Venerdì
+    private var thisWeekEventSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("QUESTO VENERDÌ")
+                    .font(.caption.weight(.semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(.white.opacity(0.7))
+                
+                HStack(spacing: 8) {
+                    Text("H-ZOO #\(countdownVM.nextEventNumber)")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(HZooConfig.eventColor(for: countdownVM.nextEventNumber))
+                    
+                    Text("·")
+                        .foregroundStyle(.quaternary)
+                    
+                    Text(countdownVM.nextEventFullDateString)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.white)
+                }
+            }
+            
+            Divider()
+                .background(Color.white.opacity(0.1))
+            
+            // Info rapide
+            VStack(spacing: 12) {
+                quickInfoRow(icon: "clock.fill", text: "Start ore 23:00", color: HZooConfig.accentCyan)
+                quickInfoRow(icon: "eurosign.circle.fill", text: "♂ \(HZooConfig.priceMan) · ♀ \(HZooConfig.priceLadyBefore) entro 00:30", color: .green)
+                quickInfoRow(icon: "mappin.circle.fill", text: "\(HZooConfig.venueName) \(HZooConfig.venueLocation)", color: .orange)
+            }
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.06))
+                .shadow(color: HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.1), radius: 16, x: 0, y: 8)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.3), HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.1)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+        )
+    }
+    
+    // MARK: - Prossimo Venerdì
+    private var nextWeekEventSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("PREPARATI PER IL PROSSIMO")
+                        .font(.caption.weight(.bold))
+                        .tracking(1)
+                        .foregroundStyle(.white.opacity(0.7))
+                    
+                    HStack(spacing: 8) {
+                        Text("H-ZOO #\(countdownVM.nextEventNumber + 1)")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(HZooConfig.eventColor(for: countdownVM.nextEventNumber + 1))
+                        
+                        Circle()
+                            .fill(HZooConfig.textWhite.opacity(0.3))
+                            .frame(width: 4, height: 4)
+                        
+                        // Calcola il prossimo venerdì dopo quello corrente
+                        Text(nextWeekDateString)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.white)
+                    }
+                }
+                
+                Spacer()
+            }
+            
+            Text("Impossibile perdere la prossima serata!")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.8))
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(HZooConfig.eventColor(for: countdownVM.nextEventNumber + 1).opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(HZooConfig.eventColor(for: countdownVM.nextEventNumber + 1).opacity(0.3), lineWidth: 1)
+        )
+    }
+    
+    // MARK: - Video Locali (Aftermovie & TikTok)
+    private var instagramSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Image(systemName: "video.fill")
+                    .font(.title2)
+                    .foregroundStyle(HZooConfig.primaryNeon)
+                
+                Text("Dai Social")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                
+                Spacer()
+            }
+            
+            // 2 colonne: Aftermovie | TikTok
+            HStack(spacing: 12) {
+                ForEach(HZooConfig.videos) { video in
+                    videoCard(video: video)
+                }
+            }
+        }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 20)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(hex: "1a1a1a"))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(HZooConfig.primaryNeon.opacity(0.2), lineWidth: 1)
+        )
+    }
+    
+    private func videoCard(video: LocalVideo) -> some View {
+        Button(action: {
+            haptic(.medium)
+            selectedVideo = video
+        }) {
+            VStack(spacing: 0) {
+                // Thumbnail con play overlay
+                ZStack {
+                    if let thumbnail = UIImage(named: video.thumbnailName) {
+                        Image(uiImage: thumbnail)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(height: 180)
+                            .clipped()
+                    } else {
+                        // Fallback con icona video
+                        Rectangle()
+                            .fill(Color.black.opacity(0.8))
+                            .frame(height: 180)
+                            .overlay {
+                                VStack(spacing: 8) {
+                                    Image(systemName: video.type == .aftermovie ? "film.fill" : "play.rectangle.fill")
+                                        .font(.system(size: 40))
+                                        .foregroundStyle(HZooConfig.primaryNeon)
+                                    
+                                    Text(video.type == .aftermovie ? "AFTERMOVIE" : "TIKTOK")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(HZooConfig.primaryNeon.opacity(0.2))
+                                        )
+                                }
+                            }
+                    }
+                    
+                    // Play button overlay
+                    Circle()
+                        .fill(Color.black.opacity(0.7))
+                        .frame(width: 60, height: 60)
+                        .overlay {
+                            Image(systemName: "play.fill")
+                                .font(.title)
+                                .foregroundStyle(.white)
+                        }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                
+                // Titolo video
+                Text(video.title)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(hex: "1a1a1a"))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(HZooConfig.primaryNeon.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private func quickInfoRow(icon: String, text: String, color: Color = HZooConfig.accentCyan) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.callout)
+                .foregroundStyle(color)
+                .frame(width: 20, alignment: .center)
+            
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.white)
+            
+            Spacer()
+        }
+    }
+    
+    private var nextWeekDateString: String {
+        let calendar = HZooConfig.calendar
+        let nextEvent = countdownVM.calculateNextEvent(from: Date())
+        
+        // Aggiungi 7 giorni per il prossimo venerdì
+        guard let weekAfter = calendar.date(byAdding: .day, value: 7, to: nextEvent) else {
+            return "Prossimo venerdì"
+        }
+        
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "it_IT")
+        formatter.timeZone = HZooConfig.timezone
+        formatter.dateFormat = "EEEE d MMMM"
+        return formatter.string(from: weekAfter).capitalized
+    }
+    
+    // MARK: - Countdown (compatto)
+    private var countdownSection: some View {
+        VStack(spacing: 12) {
+            if !countdownVM.isEventActive {
+                // Countdown normale
+                VStack(spacing: 16) {
+                    Text("PROSSIMO H-ZOO")
+                        .font(.caption.weight(.semibold))
+                        .tracking(1)
+                        .foregroundStyle(.white)
+                        
+                    HStack(spacing: 4) {
+                        countdownUnit(value: countdownVM.days, label: "G")
+                        separatorDot
+                        countdownUnit(value: countdownVM.hours, label: "H")
+                        separatorDot
+                        countdownUnit(value: countdownVM.minutes, label: "M")
+                        separatorDot
+                        countdownUnit(value: countdownVM.seconds, label: "S")
+                    }
+                    
+                    Text(dynamicMotivationalMessage)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(hex: "1a1a1a"))
+                .shadow(
+                    color: timerGlow ? HZooConfig.primaryNeon.opacity(0.3) : Color.clear,
+                    radius: timerGlow ? 20 : 0,
+                    x: 0,
+                    y: 0
+                )
+        )
+        .onAppear {
+            withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
+                timerGlow = true
+            }
+        }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(countdownVM.accessibilityLabel)
+    }
+    
+    private var separatorDot: some View {
+        Circle()
+            .fill(HZooConfig.primaryNeon.opacity(0.4))
+            .frame(width: 4, height: 4)
+            .padding(.horizontal, 4)
+            .padding(.bottom, 16)
+    }
+    
+    private func countdownUnit(value: Int, label: String) -> some View {
+        VStack(spacing: 4) {
+            Text(String(format: "%02d", value))
+                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .monospacedDigit()
+            
+            Text(label)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.white.opacity(0.7))
+        }
+    }
+    
+    // MARK: - Gioco della Serata Card
+    private func eventGameCard(_ game: EventGame) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header con icona
+            HStack(spacing: 12) {
+                Text(game.icon)
+                    .font(.system(size: 50))
+                    .frame(width: 70, height: 70)
+                    .background(
+                        LinearGradient(
+                            colors: [HZooConfig.primaryNeon.opacity(0.2), HZooConfig.accentCyan.opacity(0.2)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("GIOCO DELLA SERATA")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(HZooConfig.primaryNeon)
+                        .tracking(1)
+                    
+                    Text(game.title)
+                        .font(.title2.bold())
+                        .foregroundStyle(.white)
+                }
+                
+                Spacer()
+            }
+            
+            // Descrizione
+            Text(game.description)
+                .font(.body)
+                .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(2)
+            
+            // Info Grid
+            VStack(spacing: 8) {
+                EventGameInfoRow(icon: "clock.fill", label: "Orario", value: game.startTime)
+                EventGameInfoRow(icon: "mappin.circle.fill", label: "Dove", value: game.location)
+                EventGameInfoRow(icon: "trophy.fill", label: "Premio", value: game.prizes)
+            }
+        }
+        .padding(20)
+        .background(Color(hex: "1a1a1a"))
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [HZooConfig.primaryNeon.opacity(0.3), HZooConfig.accentCyan.opacity(0.3)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1.5
+                )
+        )
+        .shadow(color: HZooConfig.primaryNeon.opacity(0.15), radius: 20, x: 0, y: 10)
+    }
+    
+    // MARK: - Omaggio Donna Card
+    private var ladiesFreeCard: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.title2)
+                        .foregroundStyle(HZooConfig.primaryNeon)
+                    
+                    Text("OMAGGIO DONNA")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.white)
+                }
+                
+                Text("Ingresso gratuito per le donne fino alle 00:30")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            
+            Spacer()
+            
+            VStack(spacing: 4) {
+                Text("SCADE TRA")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .tracking(0.5)
+                
+                Text(countdownVM.ladiesCountdown)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(HZooConfig.primaryNeon)
+                    .monospacedDigit()
+            }
+        }
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            HZooConfig.primaryNeon.opacity(0.15),
+                            HZooConfig.primaryNeon.opacity(0.05)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(HZooConfig.primaryNeon.opacity(0.3), lineWidth: 1)
+        )
+        .shadow(color: HZooConfig.primaryNeon.opacity(0.2), radius: 8, x: 0, y: 4)
+    }
+    
+    // MARK: - KPI Quick Actions
+    private var kpiQuickActionsSection: some View {
+        HStack(spacing: 12) {
+            kpiActionCard(
+                icon: "wineglass",
+                title: "Tavolo",
+                subtitle: "Prenota ora",
+                action: {
+                    haptic(.medium)
+                    trackEvent("tap_prenota_from_home")
+                    // Navigate to Tavolo tab
+                    NotificationCenter.default.post(name: .switchToTab, object: 1)
+                }
+            )
+            
+            kpiActionCard(
+                icon: "eurosign.circle",
+                title: "Prezzi",
+                subtitle: "Ingresso & drink",
+                action: {
+                    haptic(.light)
+                    trackEvent("tap_prezzi")
+                    // Navigate to Prezzi tab
+                    NotificationCenter.default.post(name: .switchToTab, object: 2)
+                }
+            )
+            
+            kpiActionCard(
+                icon: "map",
+                title: "Arrivo",
+                subtitle: "Come arrivare",
+                action: {
+                    haptic(.light)
+                    trackEvent("tap_maps")
+                    openMaps()
+                }
+            )
+        }
+    }
+    
+    private func kpiActionCard(icon: String, title: String, subtitle: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .medium))
+                    .foregroundStyle(HZooConfig.accentCyan)
+                
+                VStack(spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                    
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color(hex: "1a1a1a"))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+    
+    // MARK: - Social Media
+    private var contactsSection: some View {
+        HStack(spacing: 12) {
+            socialButton(icon: "instagram", text: "Instagram", color: Color(hex: "833AB4"), isCustomIcon: true) {
+                haptic(.light)
+                trackEvent("tap_instagram")
+                if let url = URL(string: HZooConfig.instagramURL) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            
+            socialButton(icon: "tiktok", text: "TikTok", color: Color(hex: "2a2a2a"), isCustomIcon: true) {
+                haptic(.light)
+                trackEvent("tap_tiktok")
+                print("🔗 Tentativo apertura TikTok: \(HZooConfig.tiktokURL)")
+                if let url = URL(string: HZooConfig.tiktokURL) {
+                    UIApplication.shared.open(url) { success in
+                        print("📱 TikTok aperto: \(success)")
+                    }
+                } else {
+                    print("❌ URL TikTok non valido")
+                }
+            }
+        }
+        .padding(.top, 8)
+    }
+    
+    private func socialButton(icon: String, text: String, color: Color, isCustomIcon: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                if isCustomIcon {
+                    // Icona SVG personalizzata (bianca)
+                    Image(icon)
+                        .renderingMode(.template)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 20, height: 20)
+                        .foregroundStyle(.white)
+                } else {
+                    // Icona SF Symbol
+                    Image(systemName: icon)
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+                
+                Text(text)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 60)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [color, color.opacity(0.85)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .shadow(color: color.opacity(0.3), radius: 8, x: 0, y: 4)
+            )
+        }
+        .buttonStyle(ScaleButtonStyle())
+    }
+    
+    private func openMaps() {
+        let address = HZooConfig.venueFullAddress.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        if let url = URL(string: "http://maps.apple.com/?address=\(address)") {
+            UIApplication.shared.open(url)
         }
     }
 }
 
-// MARK: - 🦩 H-ZOO Tab (Venerdì Selvaggio - Over 21)
-struct HZooTabView: View {
+// MARK: - 💰 Prezzi View (Separata)
+struct PrezziView: View {
+    
     var body: some View {
         NavigationStack {
-            List {
-                // Hero Section
-                Section {
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Hero
                     VStack(spacing: 12) {
-                        Image(systemName: "bolt.fill")
+                        Image(systemName: "eurosign.circle.fill")
                             .font(.system(size: 50))
-                            .foregroundStyle(.pink)
+                            .foregroundStyle(HZooConfig.primaryNeon)
                         
-                        Text("H‑ZOO")
-                            .font(.system(size: 32, weight: .black, design: .rounded))
-                            .tracking(2)
-                        
-                        Text("VENERDÌ NOTTE")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.secondary)
+                        Text("Info Prezzi")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(HZooConfig.textWhite)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
+                    .padding(.top, 24)
+                    
+                    // Prezzi Ingresso
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("💸 Ingresso")
+                            .font(.headline)
+                            .foregroundStyle(HZooConfig.textWhite)
+                        
+                        VStack(spacing: 12) {
+                            priceRow(icon: "👔", title: "Uomo", price: HZooConfig.priceMan, detail: "Valido tutta la notte")
+                            priceRow(icon: "👗", title: "Donna", price: "Omaggio", detail: "Omaggio entro le 00:30, poi 15€")
+                        }
+                        .padding(16)
+                        .background(Color(hex: "1a1a1a"))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    
+                    // Servizi
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("🎫 Servizi")
+                            .font(.headline)
+                            .foregroundStyle(HZooConfig.textWhite)
+                        
+                        VStack(spacing: 12) {
+                            priceRow(icon: "🧥", title: "Guardaroba", price: HZooConfig.priceCoatCheck, detail: "Obbligatorio per giacche e borse")
+                            priceRow(icon: "🍸", title: "Consumazione", price: HZooConfig.priceDrink, detail: "Drink e cocktail")
+                        }
+                        .padding(16)
+                        .background(Color(hex: "1a1a1a"))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
+                    
+                    // Note
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Info Utili", systemImage: "info.circle.fill")
+                            .font(.headline)
+                            .foregroundStyle(HZooConfig.accentCyan)
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            noteRow(text: "Pagamenti: contanti e carte")
+                            noteRow(text: "Ingresso non rimborsabile")
+                            noteRow(text: "Prezzi soggetti a variazioni per eventi speciali")
+                        }
+                        .padding(16)
+                        .background(Color(hex: "1a1a1a"))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    }
                 }
-                .listRowBackground(Color.clear)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 32)
+            }
+            .background(Color.black.ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .onAppear {
+            trackEvent("view_prezzi")
+        }
+    }
+    
+    private func priceRow(icon: String, title: String, price: String, detail: String) -> some View {
+        HStack(spacing: 12) {
+            Text(icon)
+                .font(.title)
+            
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(HZooConfig.textWhite)
                 
-                // ⚠️ Regole Ingresso
-                Section {
-                    Label("Solo Over 21 (nati fino al 2004)", systemImage: "18.circle.fill")
-                    Label("Selezione all'ingresso", systemImage: "person.badge.shield.checkmark.fill")
-                    Label("Documento originale obbligatorio", systemImage: "doc.text.fill")
-                    Label("No fotocopie o screenshot", systemImage: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                    Label("Apertura: 23:00 - 06:00", systemImage: "clock.fill")
-                } header: {
-                    Label("Regole di Ingresso", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.pink)
-                }
-                
-                // Countdown
-                Section("Prossimo H-ZOO") {
-                    VStack(spacing: 8) {
-                        Text("Venerdì 23:00")
-                            .font(.title2.bold())
-                        Text("2 giorni, 14 ore")
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(HZooConfig.textWhite.opacity(0.6))
+            }
+            
+            Spacer()
+            
+            Text(price)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(HZooConfig.primaryNeon)
+        }
+    }
+    
+    private func noteRow(text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("•")
+                .foregroundStyle(HZooConfig.accentCyan)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(HZooConfig.textWhite.opacity(0.85))
+        }
+    }
+}
+
+// MARK: - Custom Button Style (iOS 26-like)
+private struct ScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .opacity(configuration.isPressed ? 0.9 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
+// MARK: - Pulsing Dot Animation
+private struct PulsingDot: ViewModifier {
+    @State private var pulse = false
+    
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(pulse ? 1.3 : 1.0)
+            .opacity(pulse ? 0.6 : 1.0)
+            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: pulse)
+            .onAppear { pulse = true }
+    }
+}
+
+// MARK: - 🎫 Prenota Tavolo Tab
+// Helper per EventGame Info Row
+private struct EventGameInfoRow: View {
+    let icon: String
+    let label: String
+    let value: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.body)
+                .foregroundStyle(HZooConfig.accentCyan)
+                .frame(width: 20)
+            
+            Text(label)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.6))
+                .frame(width: 60, alignment: .leading)
+            
+            Text(value)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+            
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.3))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+struct PrenotaTabView: View {
+    @State private var showComingSoon = false
+    
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 32) {
+                    // Hero
+                    VStack(spacing: 12) {
+                        Image(systemName: "calendar.badge.plus")
+                            .font(.system(size: 50))
+                            .foregroundStyle(HZooConfig.primaryNeon)
+                        
+                        Text("Prenota il Tuo Tavolo")
+                            .font(.system(size: 28, weight: .bold))
+                            .foregroundStyle(HZooConfig.textWhite)
+                            .multilineTextAlignment(.center)
+                        
+                        Text("Tavoli in sala e privé. Ingresso compreso per il gruppo. Consigliato arrivo entro le 00:30")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(HZooConfig.textWhite.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                }
-                
-                // Programma Serata
-                Section("Programma Serata") {
-                    HStack {
-                        Text("23:00")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.pink)
-                            .frame(width: 50, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Apertura")
-                                .font(.subheadline.bold())
-                            Text("Ingresso e primi drink")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    .padding(.top, 24)
                     
-                    HStack {
-                        Text("00:00")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.pink)
-                            .frame(width: 50, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Warm Up")
-                                .font(.subheadline.bold())
-                            Text("Musica e atmosfera")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    // Tipologie di Tavoli
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("🪑 Tipologie di Tavoli")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(HZooConfig.textWhite)
+                        
+                        VStack(spacing: 12) {
+                            tableTypeRow(icon: "👑", title: "VIP", location: "Palco", priority: 1)
+                            tableTypeRow(icon: "🎛️", title: "SUPER", location: "Console", priority: 2)
+                            tableTypeRow(icon: "✨", title: "WOW", location: "Palchi laterali", priority: 3)
+                            tableTypeRow(icon: "🎵", title: "Classici", location: "Pista e balconata", priority: 4)
                         }
+                        .padding(20)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(Color(hex: "1a1a1a"))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                        .strokeBorder(HZooConfig.textWhite.opacity(0.1), lineWidth: 1)
+                                )
+                        )
                     }
+                    .padding(.horizontal, 20)
                     
-                    HStack {
-                        Text("01:00")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.pink)
-                            .frame(width: 50, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Peak Time")
-                                .font(.subheadline.bold())
-                            Text("Pista al massimo")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    // Condizioni e Regole
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("📋 Condizioni e Regole")
+                            .font(.title3.weight(.bold))
+                            .foregroundStyle(HZooConfig.textWhite)
+                        
+                        VStack(alignment: .leading, spacing: 10) {
+                            conditionRow(text: "Nati entro l'anno 2004 (21 anni compiuti)")
+                            conditionRow(text: "Documento di identità originale obbligatorio")
+                            conditionRow(text: "Prenotazione anticipata richiesta")
+                            conditionRow(text: "Pagamento in loco alla prenotazione")
+                            conditionRow(text: "Ingresso prioritario per i prenotati")
+                            conditionRow(text: "La direzione si riserva diritto di selezione")
+                            conditionRow(text: "No fotocopie o screenshot del documento")
                         }
+                        .padding(20)
+                        .background(
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(Color(hex: "1a1a1a"))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                        .strokeBorder(HZooConfig.accentCyan.opacity(0.2), lineWidth: 1)
+                                )
+                        )
                     }
+                    .padding(.horizontal, 20)
                     
-                    HStack {
-                        Text("03:00")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.pink)
-                            .frame(width: 50, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("After Hours")
-                                .font(.subheadline.bold())
-                            Text("Chiusura alle 06:00")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    // CTA Principale
+                    VStack(spacing: 12) {
+                        Button {
+                            haptic(.medium)
+                            trackEvent("tap_prenota_ora")
+                            showComingSoon = true
+                        } label: {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                Text("Prenota Ora")
+                                    .font(.headline)
+                            }
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 18)
+                            .background(
+                                LinearGradient(
+                                    colors: [HZooConfig.primaryNeon, HZooConfig.primaryNeon.opacity(0.8)],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .cornerRadius(16)
+                            .shadow(color: HZooConfig.primaryNeon.opacity(0.4), radius: 12, x: 0, y: 6)
                         }
-                    }
-                }
-                
-                // Weekend Vibes
-                Section("Weekend Vibes") {
-                    ScrollView(.horizontal, showsIndicators: false) {
+                        
                         HStack(spacing: 12) {
-                            ForEach(0..<6) { _ in
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color.gray.opacity(0.3))
-                                    .frame(width: 100, height: 150)
-                                    .overlay(
-                                        Image(systemName: "camera.fill")
-                                            .foregroundStyle(.gray)
-                                    )
+                            contactButton(icon: "phone.fill", title: "Chiama", color: .green) {
+                                haptic(.light)
+                                trackEvent("tap_infoline_prenota")
+                                if let url = URL(string: "tel:\(HZooConfig.phoneNumber)") {
+                                    UIApplication.shared.open(url)
+                                }
+                            }
+                            
+                            contactButton(icon: "message.fill", title: "WhatsApp", color: Color(hex: "25D366")) {
+                                haptic(.light)
+                                trackEvent("tap_whatsapp_prenota")
+                                let text = "Ciao! Vorrei prenotare un tavolo H-ZOO per venerdì prossimo"
+                                if let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                                   let url = URL(string: "https://wa.me/\(HZooConfig.whatsappNumber)?text=\(encoded)") {
+                                    UIApplication.shared.open(url)
+                                }
                             }
                         }
-                        .padding(.vertical, 8)
                     }
-                    .listRowInsets(EdgeInsets())
+                    .padding(.horizontal, 20)
+                    
+                    
+                    // KPI Tavoli (se disponibile)
+                    if let tablesLeft = HZooConfig.tablesLeft {
+                        VStack(spacing: 8) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "table.furniture.fill")
+                                    .foregroundStyle(HZooConfig.accentCyan)
+                                Text("Tavoli Rimasti: \(tablesLeft)")
+                                    .font(.headline)
+                                    .foregroundStyle(HZooConfig.textWhite)
+                            }
+                            
+                            Text("Prenota ora per garantire il tuo posto")
+                                .font(.caption)
+                                .foregroundStyle(HZooConfig.textWhite.opacity(0.6))
+                        }
+                        .padding(.vertical, 16)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(HZooConfig.accentCyan.opacity(0.15))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .strokeBorder(HZooConfig.accentCyan.opacity(0.3), lineWidth: 1)
+                                )
+                        )
+                        .padding(.horizontal, 20)
+                    }
+                }
+                .padding(.bottom, 32)
+            }
+            .background(HZooConfig.backgroundDark.ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showComingSoon) {
+                ComingSoonView()
+            }
+        }
+        .onAppear {
+            trackEvent("view_prenota")
+        }
+    }
+    
+    private func infoRow(icon: String, title: String, detail: String) -> some View {
+        HStack(spacing: 12) {
+            Text(icon)
+                .font(.title2)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(HZooConfig.textWhite)
+                
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(HZooConfig.textWhite.opacity(0.6))
+            }
+            
+            Spacer()
+        }
+    }
+    
+    private func contactButton(icon: String, title: String, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: icon)
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(color)
+            .cornerRadius(12)
+            .shadow(color: color.opacity(0.3), radius: 8, x: 0, y: 4)
+        }
+    }
+    
+    private func ruleRow(text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(HZooConfig.accentCyan)
+                .padding(.top, 2)
+            
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(HZooConfig.textWhite.opacity(0.85))
+        }
+    }
+    
+    private func tableTypeRow(icon: String, title: String, location: String, priority: Int) -> some View {
+        HStack(spacing: 12) {
+            Text(icon)
+                .font(.title2)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                HStack {
+                    Text(title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(HZooConfig.textWhite)
+                    
+                    Spacer()
+                    
+                    Text("#\(priority)")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(HZooConfig.primaryNeon)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(HZooConfig.primaryNeon.opacity(0.1))
+                        )
                 }
                 
-                // Merch
-                Section("Merch H-ZOO") {
-                    HStack {
-                        Image(systemName: "tshirt.fill")
-                            .foregroundStyle(.pink)
-                        VStack(alignment: .leading) {
-                            Text("T-Shirt")
-                            Text("25€")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                Text(location)
+                    .font(.subheadline)
+                    .foregroundStyle(HZooConfig.textWhite.opacity(0.7))
+            }
+        }
+    }
+    
+    private func conditionRow(text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(HZooConfig.accentCyan)
+                .padding(.top, 2)
+            
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(HZooConfig.textWhite.opacity(0.85))
+        }
+    }
+}
+
+// MARK: - 🚀 Coming Soon View
+struct ComingSoonView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Spacer()
+                
+                Image(systemName: "hourglass")
+                    .font(.system(size: 80))
+                    .foregroundStyle(HZooConfig.accentCyan)
+                    .symbolEffect(.pulse, options: .repeating)
+                
+                Text("Prenotazione Online")
+                    .font(.system(size: 32, weight: .bold))
+                    .foregroundStyle(HZooConfig.textWhite)
+                
+                Text("In Arrivo Presto")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(HZooConfig.primaryNeon)
+                
+                VStack(spacing: 12) {
+                    Text("La prenotazione online sarà disponibile a breve.")
+                        .multilineTextAlignment(.center)
+                    
+                    Text("Nel frattempo, contattaci via WhatsApp o telefono per prenotare il tuo tavolo!")
+                        .multilineTextAlignment(.center)
+                        .font(.subheadline)
+                        .foregroundStyle(HZooConfig.textWhite.opacity(0.7))
+                }
+                .padding(.horizontal, 32)
+                
+                VStack(spacing: 12) {
+                    Button {
+                        haptic(.light)
+                        let text = "Ciao! Vorrei prenotare un tavolo H-ZOO per venerdì prossimo"
+                        if let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                           let url = URL(string: "https://wa.me/\(HZooConfig.whatsappNumber)?text=\(encoded)") {
+                            UIApplication.shared.open(url)
                         }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Image(systemName: "message.fill")
+                            Text("WhatsApp")
+                                .font(.headline)
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color(hex: "25D366"))
+                        .cornerRadius(12)
                     }
                     
-                    HStack {
-                        Image(systemName: "figure.walk")
-                            .foregroundStyle(.pink)
-                        VStack(alignment: .leading) {
-                            Text("Felpa")
-                            Text("45€")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    Button {
+                        haptic(.light)
+                        if let url = URL(string: "tel:\(HZooConfig.phoneNumber)") {
+                            UIApplication.shared.open(url)
                         }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                        dismiss()
+                    } label: {
+                        HStack {
+                            Image(systemName: "phone.fill")
+                            Text("Chiama")
+                                .font(.headline)
+                        }
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .background(Color.green)
+                        .cornerRadius(12)
                     }
-                    
-                    HStack {
-                        Image(systemName: "crown.fill")
-                            .foregroundStyle(.pink)
-                        VStack(alignment: .leading) {
-                            Text("Cap")
-                            Text("20€")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 16)
+                
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(HZooConfig.backgroundDark.ignoresSafeArea())
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(HZooConfig.textWhite.opacity(0.6))
                     }
                 }
             }
-            .navigationTitle("H‑ZOO")
-            .navigationBarTitleDisplayMode(.large)
         }
     }
 }
@@ -1816,6 +3494,8 @@ struct HZooTabView: View {
 // MARK: - Minigame Tab (Il gioco attuale)
 struct MinigameTabView: View {
     @EnvironmentObject var vm: PetViewModel
+    @EnvironmentObject var minigameManager: MinigameManager
+    
     // Layout constants
     private let contentWidth: CGFloat = 392
     private let gridSpacing: CGFloat = 14
@@ -1889,14 +3569,13 @@ struct MinigameTabView: View {
         return min(max(0, gained), offlineCap)
     }
     
-    // MARK: Mini-gioco: scheduling casuale (Privé Rush)
-    @State private var showMiniGame = false
-    @State private var lastMiniGameAt: Date = .distantPast
-    private let miniGameMinInterval: TimeInterval = 180  // almeno 3 minuti fra due minigiochi
-    private let miniGameTick = Timer.publish(every: 45, on: .main, in: .common).autoconnect()
+    // MARK: Mini-gioco: Privé Rush RIMOSSO
     
     // MARK: - 🎰 Daily Slot System
     private func canPlaySlotToday() -> Bool {
+        // Controlla se siamo nella finestra oraria 01:00 - 03:00 (sabato notte)
+        guard isSlotTimeWindow() else { return false }
+        
         let today = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
         if lastDailySlotDate != today {
             // Nuovo giorno: reset tentativi e vittoria
@@ -1907,15 +3586,39 @@ struct MinigameTabView: View {
         return dailySlotTries < 10 && !slotWonToday
     }
     
-    private func getRemainingTries() -> Int {
+    /// Controlla se siamo nella finestra oraria per giocare (01:00 - 03:00 del sabato)
+    private func isSlotTimeWindow() -> Bool {
+        let now = Date()
+        let calendar = HZooConfig.calendar
+        let hour = calendar.component(.hour, from: now)
+        let weekday = calendar.component(.weekday, from: now)
+        
+        // Sabato (weekday 7) dalle 01:00 alle 03:00
+        // (È la notte del venerdì H-ZOO)
+        return weekday == 7 && hour >= 1 && hour < 3
+    }
+    
+    /// Ottieni tentativi rimanenti in base al tipo di minigame
+    private func getRemainingTries(for gameType: MinigameConfig.MinigameType = .slotMachine) -> Int {
         let today = DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none)
+        
+        let maxTries: Int
+        switch gameType {
+        case .slotMachine:
+            maxTries = 10 // Slot: 10 tentativi
+        case .roulette, .scratchCard:
+            maxTries = 1  // Roulette e Gratta e Vinci: 1 tentativo
+        case .none:
+            maxTries = 0
+        }
+        
         if lastDailySlotDate != today {
-            return 10 // Nuovo giorno
+            return maxTries // Nuovo giorno
         }
         if slotWonToday {
             return 0 // Ha già vinto oggi
         }
-        return max(0, 10 - dailySlotTries)
+        return max(0, maxTries - dailySlotTries)
     }
     
     
@@ -2039,20 +3742,9 @@ struct MinigameTabView: View {
     var body: some View {
         ZStack(alignment: .top) {
             background
-
-            // CONTENT
-            VStack(spacing: compactPadding ? 12 : 20) {
-                header
-                warningBanner
-                sprite
-                gauges
-                actions
-                footer
-            }
-            .frame(maxWidth: contentWidth, alignment: .center)
-            .padding(.top, 26)
-            .padding(.horizontal, compactPadding ? 16 : 24)
-            .padding(.bottom, compactPadding ? 6 : 10)
+            
+            // DYNAMIC CONTENT - Routing basato su minigame attivo
+            dynamicMinigameContent
 
             // Shop
             .sheet(isPresented: $showShop) {
@@ -2099,7 +3791,12 @@ struct MinigameTabView: View {
                     .presentationBackground(Color.black.opacity(0.45))
             }
             // Tutorial
-            .fullScreenCover(isPresented: $showTutorial) { TutorialView(onClose: { showTutorial = false; seenTutorial = true }) }
+            .fullScreenCover(isPresented: $showTutorial) { 
+                TutorialView(onClose: { 
+                    showTutorial = false
+                    UserDefaults.standard.set(true, forKey: "El-PavoReal.seenMinigameTutorial")
+                }) 
+            }
             // Life Info
             .sheet(isPresented: $showLifeInfo) {
                 LifeInfoSheet()
@@ -2124,7 +3821,10 @@ struct MinigameTabView: View {
                 withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) { bobbing = true }
                 withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { pulse = true }
             }
-            if !seenTutorial { showTutorial = true }
+            // Tutorial al primo accesso alla sezione Minigame
+            if showTutorialOnFirstVisit {
+                showTutorial = true
+            }
             requestNotificationsIfNeeded()
         }
         .onAppear {
@@ -2247,31 +3947,7 @@ struct MinigameTabView: View {
                     .zIndex(100)
             }
         }
-        // Avvio casuale ad ogni tick (rispetta un intervallo minimo)
-        .onReceive(miniGameTick) { _ in
-            if Date().timeIntervalSince(lastMiniGameAt) >= miniGameMinInterval {
-                maybeTriggerRandomEvent() // qui dentro settiamo showMiniGame = true con una probabilità
-            }
-        }
-
-        // Fallback: trigger manuale via notifica
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("El-PavoReal.miniGame"))) { _ in
-            showMiniGame = true
-        }
-
-        // Presentazione full-screen del mini-gioco
-        .fullScreenCover(isPresented: $showMiniGame) {
-            PriveRushView(vm: vm) { delivered, success in
-                let text = success
-                    ? "Privé Rush riuscito! Consegne: \(delivered)"
-                    : "Privé Rush fallito… Consegne: \(delivered)"
-                pushBanner(text: text,
-                           symbol: success ? "lock.open.fill" : "exclamationmark.triangle.fill",
-                           colors: success ? [.green, .mint] : [.orange, .red])
-                showMiniGame = false
-            }
-            .ignoresSafeArea()
-        }
+        // Privé Rush RIMOSSO
     }
     
     private func ageText(_ seconds: Int) -> String {
@@ -3233,7 +4909,7 @@ fileprivate struct StatTile: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.top, compactPadding ? 8 : 12)
+        .padding(.top, compactPadding ? 20 : 24)
         .onReceive(vm.$hasFinishedRun) { finished in
             if finished { showEndGame = true }
         }
@@ -3251,23 +4927,10 @@ fileprivate struct StatTile: View {
     // MARK: - 🎲 Random Events System
     /// Triggera eventi casuali (positivi/negativi) durante il gioco
     private func maybeTriggerRandomEvent() {
-        // Rispetta un intervallo minimo fra minigiochi
-        guard Date().timeIntervalSince(lastMiniGameAt) >= miniGameMinInterval else { return }
         // Probabilità base (clamp 0…1)
         let chance = max(0.0, min(1.0, eventChance))
         guard Double.random(in: 0...1) < chance else { return }
-        // 1 su 5: parte il mini-gioco (Privé Rush)
-        if Int.random(in: 0..<5) == 0 {
-            lastMiniGameAt = Date()
-            postOverlayEvent(
-                title: "Mini-gioco: Privé Rush",
-                icon: "lock.open.fill",
-                tone: "system",
-                lines: ["Consegna drink nel Privé!", "Hai 45 secondi"]
-            )
-            showMiniGame = true
-            return
-        }
+        // Mini-gioco Privé Rush RIMOSSO
         let events: [GameEvent] = [
             .positive("Giro omaggi dal bar: +6 Festa, +4 Sete, +3 PavoLire", {
                 vm.happiness = min(vm.statCap, vm.happiness + 6)
@@ -3694,8 +5357,11 @@ private struct EndGameSheet: View {
 
         // evita duplicati / ripulisci vecchi ID
         UNUserNotificationCenter.current().removePendingNotificationRequests(
-            withIdentifiers: ["checkin","lowSatietyBg","criticallyLowBg","fastDropBg","stateSpeedBg"]
+            withIdentifiers: ["checkin","lowSatietyBg","criticallyLowBg","fastDropBg","stateSpeedBg","slotTimeNotif"]
         )
+        
+        // NUOVO: Notifica per slot machine (01:00-03:00 sabato)
+        scheduleSlotTimeNotification()
 
         let cap = vm.statCap
         let lows = [vm.satiety, vm.energy, vm.hygiene, vm.happiness]
@@ -3704,7 +5370,7 @@ private struct EndGameSheet: View {
         // 1) È troppo tempo che non entro → check-in a ~75 minuti
         scheduleLocal(
             id: "checkin",
-            title: "Tutto ok su El-PavoReal?",
+            title: "Tutto ok?",
             body: "È un po’ che non entri. Dai un’occhiata al Pavone.",
             after: 75 * 60
         )
@@ -3714,7 +5380,7 @@ private struct EndGameSheet: View {
             scheduleLocal(
                 id: "stateSpeedBg",
                 title: "Consumi più veloci",
-                body: "Il Pavone è in mood \(vm.moodTitle.lowercased()). Potrebbe scendere più in fretta.",
+                body: "Il Pavone è in modalità \(vm.moodTitle.lowercased()). Potrebbe scendere più in fretta.",
                 after: 30 * 60
             )
         }
@@ -3723,8 +5389,8 @@ private struct EndGameSheet: View {
         if lowCount >= 2 {
             scheduleLocal(
                 id: "fastDropBg",
-                title: "Sta calando velocemente",
-                body: "Più statistiche sono basse. Rientra a dare una mano.",
+                title: "Attenzione!",
+                body: "Diverse statistiche sono basse. Non lasciar morire il Pavone!",
                 after: 30 * 60
             )
         }
@@ -3733,19 +5399,191 @@ private struct EndGameSheet: View {
         if vm.life < 30 || lows.contains(where: { $0 < 0.15 * cap }) {
             scheduleLocal(
                 id: "criticallyLowBg",
-                title: "Critico: rischio KO",
+                title: "Critico: rischio KO!",
                 body: "Il Pavone è messo male. Entra subito e curalo.",
                 after: 10 * 60
             )
         }
     }
 
+    /// Schedula notifica per slot machine (sabato 00:55)
+    private func scheduleSlotTimeNotification() {
+        let now = Date()
+        let calendar = HZooConfig.calendar
+        
+        // Calcola il prossimo sabato alle 00:55
+        var components = DateComponents()
+        components.weekday = 7 // Sabato
+        components.hour = 0
+        components.minute = 55
+        components.timeZone = HZooConfig.timezone
+        
+        guard let nextDate = calendar.nextDate(after: now, matching: components, matchingPolicy: .nextTime) else { return }
+        
+        let timeInterval = nextDate.timeIntervalSinceNow
+        guard timeInterval > 0 else { return }
+        
+        let content = UNMutableNotificationContent()
+        content.title = "🎰 È l'ora della Slot Machine!"
+        content.body = "Hai 10 tentativi per vincere la maglietta H-ZOO! Entra ora 🎁"
+        content.sound = .default
+        content.badge = 1
+        
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: timeInterval, repeats: false)
+        let request = UNNotificationRequest(identifier: "slotTimeNotif", content: content, trigger: trigger)
+        
+        UNUserNotificationCenter.current().add(request)
+        print("🔔 Notifica slot schedulata per: \(nextDate)")
+    }
     
     // MARK: - Notifications permission
     private func requestNotificationsIfNeeded() {
         guard notificationsEnabled, !askedNotifications else { return }
         askedNotifications = true
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+    }
+    
+    // MARK: - Tutorial al primo accesso
+    private var showTutorialOnFirstVisit: Bool {
+        !UserDefaults.standard.bool(forKey: "El-PavoReal.seenMinigameTutorial")
+    }
+    
+    // MARK: - Dynamic Content Views
+    
+    /// Router principale per minigame
+    @ViewBuilder
+    private var dynamicMinigameContent: some View {
+        if let currentGame = minigameManager.currentMinigame {
+            switch currentGame.type {
+            case .slotMachine:
+                slotMachineContent
+            case .roulette:
+                rouletteContent
+            case .scratchCard:
+                scratchCardContent
+            case .none:
+                noMinigameContent
+            }
+        } else {
+            // Fallback: mostra slot machine di default mentre carica
+            slotMachineContent
+        }
+    }
+    
+    /// Slot Machine (current default)
+    private var slotMachineContent: some View {
+        VStack(spacing: compactPadding ? 12 : 20) {
+            header
+            warningBanner
+            sprite
+            gauges
+            actions
+            footer
+        }
+        .frame(maxWidth: contentWidth, alignment: .center)
+        .padding(.top, 26)
+        .padding(.horizontal, compactPadding ? 16 : 24)
+        .padding(.bottom, compactPadding ? 6 : 10)
+    }
+    
+    /// Roulette (future minigame)
+    private var rouletteContent: some View {
+        VStack(spacing: 20) {
+            Text("🎰 Roulette Pavo")
+                .font(.largeTitle.bold())
+                .foregroundStyle(.white)
+            
+            Text("Prossimamente disponibile!")
+                .font(.title3)
+                .foregroundStyle(.white.opacity(0.7))
+            
+            Image(systemName: "gamecontroller.fill")
+                .font(.system(size: 100))
+                .foregroundStyle(HZooConfig.primaryNeon)
+                .padding(.top, 40)
+            
+            Text("Questo minigame sarà attivo nelle prossime settimane")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+        }
+        .frame(maxHeight: .infinity)
+        .padding()
+    }
+    
+    /// Scratch Card (future minigame)
+    private var scratchCardContent: some View {
+        VStack(spacing: 20) {
+            Text("🎫 Gratta e Vinci")
+                .font(.largeTitle.bold())
+                .foregroundStyle(.white)
+            
+            Text("Prossimamente disponibile!")
+                .font(.title3)
+                .foregroundStyle(.white.opacity(0.7))
+            
+            Image(systemName: "ticket.fill")
+                .font(.system(size: 100))
+                .foregroundStyle(HZooConfig.primaryNeon)
+                .padding(.top, 40)
+            
+            Text("Questo minigame sarà attivo nelle prossime settimane")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.5))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 40)
+        }
+        .frame(maxHeight: .infinity)
+        .padding()
+    }
+    
+    /// No Minigame (pause week)
+    private var noMinigameContent: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "moon.zzz.fill")
+                .font(.system(size: 100))
+                .foregroundStyle(.cyan)
+                .padding(.bottom, 20)
+            
+            Text("Settimana di Pausa")
+                .font(.largeTitle.bold())
+                .foregroundStyle(.white)
+            
+            Text("Il Pavo si sta riposando 🦚")
+                .font(.title3)
+                .foregroundStyle(.white.opacity(0.7))
+                .padding(.bottom, 30)
+            
+            VStack(alignment: .leading, spacing: 12) {
+                MinigameInfoRow(icon: "calendar", text: "Torna venerdì prossimo per un nuovo minigame!")
+                MinigameInfoRow(icon: "sparkles", text: "Nel frattempo, continua ad accumulare Pavo Lire")
+                MinigameInfoRow(icon: "bell.fill", text: "Riceverai una notifica quando sarà attivo")
+            }
+            .padding(.horizontal, 30)
+            
+            Spacer()
+        }
+        .frame(maxHeight: .infinity)
+        .padding(.top, 80)
+    }
+}
+
+// Helper per NoMinigame view
+private struct MinigameInfoRow: View {
+    let icon: String
+    let text: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.body)
+                .foregroundStyle(HZooConfig.primaryNeon)
+                .frame(width: 24)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.85))
+        }
     }
 }
 
@@ -4288,226 +6126,8 @@ struct LoggedEvent: Identifiable {
     let colors: [Color]
 }
 
-// MARK: - Mini-game: Privé Rush (new)
-struct PriveRushView: View {
-    @Environment(\.dismiss) private var dismiss
-    @ObservedObject var vm: PetViewModel
-    var successThreshold: Int = 6
-    private let duration: Int = 45
-    private let cols: Int = 8
-    private let rows: Int = 12
-
-    struct Cell: Hashable { var x: Int; var y: Int }
-
-    @State private var timeLeft: Int = 45
-    @State private var player = Cell(x: 1, y: 10)
-    @State private var goal   = Cell(x: 6, y: 1)
-    @State private var pickups: Set<Cell> = []
-    @State private var carried: Int = 0
-    @State private var delivered: Int = 0
-    @State private var finished: Bool = false
-
-    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
-    let onFinish: (_ delivered: Int, _ success: Bool) -> Void
-
-    var body: some View {
-        ZStack {
-            // Sfondo standard (non home): scuro + indigo
-            LinearGradient(colors: [.black, .indigo.opacity(0.6)],
-                           startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea()
-
-            VStack(spacing: 12) {
-                // Arena
-                GeometryReader { geo in
-                    let w = geo.size.width
-                    let h = min(geo.size.height, geo.size.width * 1.2)
-                    let cw = w / CGFloat(cols)
-                    let ch = h / CGFloat(rows)
-
-                    ZStack {
-                        // Griglia
-                        Path { p in
-                            for x in 0...cols {
-                                p.move(to: CGPoint(x: CGFloat(x)*cw, y: 0))
-                                p.addLine(to: CGPoint(x: CGFloat(x)*cw, y: h))
-                            }
-                            for y in 0...rows {
-                                p.move(to: CGPoint(x: 0, y: CGFloat(y)*ch))
-                                p.addLine(to: CGPoint(x: w, y: CGFloat(y)*ch))
-                            }
-                        }
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-
-                        // Goal (Privé)
-                        Image(systemName: "lock.open.fill")
-                            .foregroundStyle(.yellow)
-                            .shadow(color: .yellow.opacity(0.7), radius: 8)
-                            .position(pos(goal, cw, ch))
-
-                        // Pickups (Shot)
-                        ForEach(Array(pickups), id: \.self) { cell in
-                            Image(systemName: "bolt.fill")
-                                .foregroundStyle(.pink)
-                                .shadow(color: .pink.opacity(0.8), radius: 8)
-                                .position(pos(cell, cw, ch))
-                        }
-
-                        // Player (token del Pavone)
-                        ZStack {
-                            Circle().fill(.white.opacity(0.2)).frame(width: min(cw,ch)*0.9, height: min(cw,ch)*0.9)
-                            Image(systemName: "party.popper").foregroundStyle(.white)
-                        }
-                        .position(pos(player, cw, ch))
-                    }
-                    .contentShape(Rectangle())
-                    .frame(height: h)
-                }
-
-                Spacer(minLength: 0)
-
-                // D‑Pad a croce + bottone centrale "Consegna"
-                DPadCrossControl(
-                    onUp:      { step(dx:  0, dy: -1) },
-                    onLeft:    { step(dx: -1, dy:  0) },
-                    onRight:   { step(dx:  1, dy:  0) },
-                    onDown:    { step(dx:  0, dy:  1) },
-                    onConfirm: { confirmDelivery() }
-                )
-                .safeAreaPadding(.bottom, 12)
-            }
-            .padding(.horizontal, 16)
-        }
-        .onAppear { reset() }
-        .onReceive(ticker) { _ in
-            guard !finished else { return }
-            withAnimation(.easeInOut(duration: 0.2)) {
-                if timeLeft > 0 { timeLeft -= 1 } else { finish() }
-            }
-        }
-        .interactiveDismissDisabled(true)
-        .safeAreaInset(edge: .top) {
-            HStack(spacing: 12) {
-                Text("PRIVÉ RUSH!")
-                    .font(.headline.bold())
-                    .foregroundStyle(.white)
-                Spacer()
-                CapsuleLabel(text: "Tempo: \(timeLeft)s")
-                CapsuleLabel(text: "Consegne: \(delivered)/\(successThreshold)")
-                CapsuleLabel(text: "In mano: \(carried)")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.ultraThinMaterial)
-            .overlay(Rectangle().fill(Color.white.opacity(0.12)).frame(height: 0.5), alignment: .bottom)
-        }
-    }
-
-    // MARK: Helpers
-    private func pos(_ c: Cell, _ cw: CGFloat, _ ch: CGFloat) -> CGPoint {
-        CGPoint(x: (CGFloat(c.x) + 0.5) * cw, y: (CGFloat(c.y) + 0.5) * ch)
-    }
-
-    private func reset() {
-        timeLeft = duration
-        carried = 0
-        delivered = 0
-        player = Cell(x: 1, y: rows-2)
-        goal   = Cell(x: cols-2, y: 1)
-        pickups = []
-        var used: Set<Cell> = [player, goal]
-        while pickups.count < 9 {
-            let c = Cell(x: Int.random(in: 0..<cols), y: Int.random(in: 0..<rows))
-            if !used.contains(c) { pickups.insert(c); used.insert(c) }
-        }
-    }
-
-    private func step(dx: Int, dy: Int) {
-        guard !finished else { return }
-        let nx = max(0, min(cols-1, player.x + dx))
-        let ny = max(0, min(rows-1, player.y + dy))
-        let next = Cell(x: nx, y: ny)
-        player = next
-        if pickups.contains(next) { pickups.remove(next); carried += 1 }
-        if next == goal && carried > 0 { delivered += carried; carried = 0 }
-        if delivered >= successThreshold { finish() }
-    }
-
-    private func confirmDelivery() {
-        guard !finished else { return }
-        if player == goal && carried > 0 {
-            delivered += carried
-            carried = 0
-            if delivered >= successThreshold { finish() }
-        }
-    }
-
-    private func finish() {
-        finished = true
-        let success = delivered >= successThreshold
-        if success {
-            vm.happiness = min(vm.statCap, vm.happiness + 10)
-            vm.PavoLire += delivered
-        } else {
-            vm.happiness = max(0, vm.happiness - 6)
-            vm.energy    = max(0, vm.energy - 4)
-        }
-        onFinish(delivered, success)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { dismiss() }
-    }
-}
-
-// Controllo D‑Pad a croce (grandi hit‑area + bottone centrale)
-private struct DPadCrossControl: View {
-    var onUp: () -> Void
-    var onLeft: () -> Void
-    var onRight: () -> Void
-    var onDown: () -> Void
-    var onConfirm: () -> Void
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.08))
-                .frame(width: 230, height: 230)
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1))
-
-            VStack(spacing: 12) {
-                Button(action: onUp) { dpadButton(system: "arrow.up") }
-                HStack(spacing: 12) {
-                    Button(action: onLeft)  { dpadButton(system: "arrow.left") }
-                    Button(action: onConfirm) {
-                        ZStack {
-                            Circle().fill(.white).frame(width: 68, height: 68)
-                            Image(systemName: "checkmark")
-                                .font(.title2.weight(.bold))
-                                .foregroundStyle(.black)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    Button(action: onRight) { dpadButton(system: "arrow.right") }
-                }
-                Button(action: onDown) { dpadButton(system: "arrow.down") }
-            }
-        }
-    }
-
-    private func dpadButton(system: String) -> some View {
-        ZStack {
-            Circle()
-                .fill(Color.white.opacity(0.1))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-                .frame(width: 58, height: 58)
-            Image(systemName: system)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(.white)
-        }
-        .buttonStyle(.plain)
-        .contentShape(Circle())
-    }
-}
+// MARK: - Mini-game: Privé Rush RIMOSSO
+// Il codice del Privé Rush è stato rimosso completamente
 
 // MARK: - Event Log (row nuova)
 
@@ -7274,8 +8894,8 @@ private struct DailySlotView: View {
             if timeElapsed >= spinDuration {
                 timer.invalidate()
                 
-                // Scegli risultato finale: probabilità dinamica (default 1%)
-                let isWin = Double.random(in: 0...1) < vm.slotWinChance
+                // Scegli risultato finale: 1% di vincita (1 su 100)
+                let isWin = Double.random(in: 0...1) < vm.slotWinChance // 0.01 = 1%
                 
                 if isWin {
                     // Vittoria: scegli un'icona casuale e mettila su tutti e 3 i rulli
@@ -7453,7 +9073,7 @@ private struct PavoLireInfoView: View {
                                 .font(.largeTitle.bold())
                                 .foregroundStyle(.white)
                             
-                            Text("La valuta del tuo Pavo")
+                            Text("La valuta del Pavoreal")
                                 .font(.subheadline)
                                 .foregroundStyle(.white.opacity(0.9))
                         }
@@ -7489,7 +9109,7 @@ private struct PavoLireInfoView: View {
                             VStack(spacing: 12) {
                                 InfoRow(icon: "gamecontroller.fill", text: "Gioca con il tuo Pavo", detail: "+10-20 P£")
                                 InfoRow(icon: "cup.and.saucer.fill", text: "Nutri e dai da bere", detail: "+5-15 P£")
-                                InfoRow(icon: "moon.zzz.fill", text: "Fai dormire il Pavo", detail: "+8-12 P£")
+                                InfoRow(icon: "moon.zzz.fill", text: "Fai dormire il Pavone", detail: "+8-12 P£")
                                 InfoRow(icon: "sparkles", text: "Ruota della Fortuna", detail: "+30-60 P£")
                                 InfoRow(icon: "clock.fill", text: "Progresso offline", detail: "Fino a 50 P£")
                             }
@@ -7506,7 +9126,7 @@ private struct PavoLireInfoView: View {
                             
                             VStack(spacing: 12) {
                                 InfoRow(icon: "cart.fill", text: "Shop - Item e Boost", detail: "50-200 P£")
-                                InfoRow(icon: "heart.fill", text: "Resuscita il Pavo", detail: "100 P£")
+                                InfoRow(icon: "heart.fill", text: "Resuscita il Pavone", detail: "100 P£")
                                 InfoRow(icon: "star.fill", text: "Sblocca Achievement", detail: "Varie quantità")
                             }
                         }
@@ -7694,6 +9314,7 @@ struct DeathScreen: View {
     
 struct SettingsView: View {
     @EnvironmentObject var vm: PetViewModel
+    @StateObject private var settings = SettingsModel()
 
     // Persisted options
     @AppStorage("El-PavoReal.notificationsEnabled") private var notificationsEnabled: Bool = true
@@ -7778,6 +9399,9 @@ struct SettingsView: View {
                                 }
                             }
                         }
+
+                        // MARK: - Preferenze Utente RIMOSSA
+                        // Il genere viene rilevato automaticamente dalle impostazioni iOS del device
 
                         // MARK: - Notifiche
                         SettingsSection(title: "Notifiche", icon: "bell.badge.fill") {

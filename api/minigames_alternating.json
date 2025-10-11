@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "last_updated": "2025-10-11T14:30:00Z",
+  "minigames": [
+    {
+      "id": "slot_week_1",
+      "title": "Slot Machine Pavo",
+      "subtitle": "Gira e vinci Pavo Lire!",
+      "active_from": "2025-10-03",
+      "active_until": "2025-10-09",
+      "enabled": true,
+      "event_numbers": [1],
+      "type": "slot_machine",
+      "config": {
+        "icons": ["🦚", "🍸", "💎", "🎉", "🔥"],
+        "bet_amount": 10,
+        "jackpot_multiplier": 50,
+        "double_multiplier": 5,
+        "single_multiplier": 2
+      }
+    },
+    {
+      "id": "pause_week_2",
+      "title": null,
+      "subtitle": null,
+      "active_from": "2025-10-10",
+      "active_until": "2025-10-16",
+      "enabled": false,
+      "event_numbers": [2],
+      "type": "none",
+      "config": {}
+    },
+    {
+      "id": "slot_week_3",
+      "title": "Slot Machine Pavo",
+      "subtitle": "Gira e vinci Pavo Lire!",
+      "active_from": "2025-10-17",
+      "active_until": "2025-10-23",
+      "enabled": true,
+      "event_numbers": [3],
+      "type": "slot_machine",
+      "config": {
+        "icons": ["🦚", "🍸", "💎", "🎉", "🔥"],
+        "bet_amount": 10,
+        "jackpot_multiplier": 50,
+        "double_multiplier": 5,
+        "single_multiplier": 2
+      }
+    },
+    {
+      "id": "pause_week_4",
+      "title": null,
+      "subtitle": null,
+      "active_from": "2025-10-24",
+      "active_until": "2025-10-30",
+      "enabled": false,
+      "event_numbers": [4],
+      "type": "none",
+      "config": {}
+    }
+  ]
+}
+

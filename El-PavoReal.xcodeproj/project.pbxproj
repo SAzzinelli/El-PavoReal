@@ -6,13 +6,31 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		FC7BC4DD2E99849B00D5FA34 /* HZOO.icon in Resources */ = {isa = PBXBuildFile; fileRef = FC7BC4DC2E99849B00D5FA34 /* HZOO.icon */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
+		FC7BC4DC2E99849B00D5FA34 /* HZOO.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = HZOO.icon; sourceTree = "<group>"; };
 		FCE9463F2E59D3E900490D79 /* El-PavoReal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "El-PavoReal.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		FC65D1262E9A856200497069 /* Exceptions for "El-PavoReal" folder in "El-PavoReal" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = FCE9463E2E59D3E900490D79 /* El-PavoReal */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		FCE946412E59D3E900490D79 /* El-PavoReal */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				FC65D1262E9A856200497069 /* Exceptions for "El-PavoReal" folder in "El-PavoReal" target */,
+			);
 			path = "El-PavoReal";
 			sourceTree = "<group>";
 		};
@@ -34,6 +52,7 @@
 			children = (
 				FCE946412E59D3E900490D79 /* El-PavoReal */,
 				FCE946402E59D3E900490D79 /* Products */,
+				FC7BC4DC2E99849B00D5FA34 /* HZOO.icon */,
 			);
 			sourceTree = "<group>";
 		};
@@ -78,7 +97,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2600;
-				LastUpgradeCheck = 2600;
+				LastUpgradeCheck = 2610;
 				TargetAttributes = {
 					FCE9463E2E59D3E900490D79 = {
 						CreatedOnToolsVersion = 26.0;
@@ -109,6 +128,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FC7BC4DD2E99849B00D5FA34 /* HZOO.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -184,6 +204,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -241,6 +262,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -249,7 +271,7 @@
 		FCE9464B2E59D3EA00490D79 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = HZOO;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = "El-PavoReal/El-PavoReal.entitlements";
@@ -259,6 +281,7 @@
 				DEVELOPMENT_TEAM = 9747WYS86R;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "El-PavoReal/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "El-PavoReal";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -289,7 +312,7 @@
 		FCE9464C2E59D3EA00490D79 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = HZOO;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = "El-PavoReal/El-PavoReal.entitlements";
@@ -299,6 +322,7 @@
 				DEVELOPMENT_TEAM = 9747WYS86R;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "El-PavoReal/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "El-PavoReal";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
