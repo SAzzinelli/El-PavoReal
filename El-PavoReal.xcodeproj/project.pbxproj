@@ -6,12 +6,7 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		FC7BC4DD2E99849B00D5FA34 /* HZOO.icon in Resources */ = {isa = PBXBuildFile; fileRef = FC7BC4DC2E99849B00D5FA34 /* HZOO.icon */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXFileReference section */
-		FC7BC4DC2E99849B00D5FA34 /* HZOO.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = HZOO.icon; sourceTree = "<group>"; };
 		FCE9463F2E59D3E900490D79 /* El-PavoReal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "El-PavoReal.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -52,7 +47,6 @@
 			children = (
 				FCE946412E59D3E900490D79 /* El-PavoReal */,
 				FCE946402E59D3E900490D79 /* Products */,
-				FC7BC4DC2E99849B00D5FA34 /* HZOO.icon */,
 			);
 			sourceTree = "<group>";
 		};
@@ -128,7 +122,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				FC7BC4DD2E99849B00D5FA34 /* HZOO.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -271,7 +264,7 @@
 		FCE9464B2E59D3EA00490D79 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = HZOO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = "El-PavoReal/El-PavoReal.entitlements";
@@ -312,7 +305,7 @@
 		FCE9464C2E59D3EA00490D79 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = HZOO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = "El-PavoReal/El-PavoReal.entitlements";

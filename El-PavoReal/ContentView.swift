@@ -103,6 +103,22 @@ struct LocalVideo: Identifiable {
     }
 }
 
+// MARK: - Remote Video Models (GitHub Pages)
+struct RemoteVideo: Identifiable, Codable {
+    let id: String
+    let title: String
+    let description: String
+    let thumbnail: String // URL della thumbnail
+    let videoUrl: String // URL del video
+    let date: String
+    let duration: String
+}
+
+struct RemoteVideoResponse: Codable {
+    let aftermovie: [RemoteVideo]
+    let tiktok: [RemoteVideo]
+}
+
 // MARK: - 🎮 Minigame Dynamic Configuration
 
 // Models
@@ -463,8 +479,11 @@ struct HZooConfig {
     static let instagramURL = "https://instagram.com/hzoo_official"
     static let tiktokURL = "https://www.tiktok.com/@elpavorealofficial"
     
-    // Video Locali
-    static let videos: [LocalVideo] = [
+    // Video Remote (GitHub Pages)
+    static let remoteVideosURL = "https://SAzzinelli.github.io/videos.json"
+    
+    // Video Locali (fallback)
+    static let localVideos: [LocalVideo] = [
         LocalVideo(
             id: "aftermovie1",
             title: "AFTERMOVIE #1",
@@ -2031,13 +2050,66 @@ class HZooCountdownViewModel: ObservableObject {
     }
 }
 
+// MARK: - 🎬 Remote Video ViewModel (GitHub Pages)
+class RemoteVideoViewModel: ObservableObject {
+    @Published var aftermovieVideos: [RemoteVideo] = []
+    @Published var tiktokVideos: [RemoteVideo] = []
+    @Published var isLoading = false
+    @Published var errorMessage: String?
+    
+    private let urlSession = URLSession.shared
+    
+    func loadVideos() {
+        isLoading = true
+        errorMessage = nil
+        
+        guard let url = URL(string: HZooConfig.remoteVideosURL) else {
+            errorMessage = "URL non valido"
+            isLoading = false
+            return
+        }
+        
+        urlSession.dataTask(with: url) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                self?.isLoading = false
+                
+                if let error = error {
+                    self?.errorMessage = "Errore di rete: \(error.localizedDescription)"
+                    return
+                }
+                
+                guard let data = data else {
+                    self?.errorMessage = "Nessun dato ricevuto"
+                    return
+                }
+                
+                do {
+                    let response = try JSONDecoder().decode(RemoteVideoResponse.self, from: data)
+                    self?.aftermovieVideos = response.aftermovie
+                    self?.tiktokVideos = response.tiktok
+                } catch {
+                    self?.errorMessage = "Errore nel parsing JSON: \(error.localizedDescription)"
+                }
+            }
+        }.resume()
+    }
+    
+    func refreshVideos() {
+        loadVideos()
+    }
+}
+
 // MARK: - 🦩 H-ZOO Home Tab (Countdown & Info Serata)
 struct HomeTabView: View {
     @StateObject private var countdownVM = HZooCountdownViewModel()
     @StateObject private var settings = SettingsModel()
+    @StateObject private var remoteVideoVM = RemoteVideoViewModel()
     @EnvironmentObject var minigameManager: MinigameManager
     @EnvironmentObject var locationManager: LocationManager
     @State private var selectedVideo: LocalVideo?
+    @State private var selectedRemoteVideo: RemoteVideo?
+    @State private var showRemoteVideoList = false
+    @State private var remoteVideoListType: LocalVideo.VideoType = .aftermovie
     @State private var scrollOffset: CGFloat = 0
     
     // MARK: - Scaling Header Variables
@@ -2177,6 +2249,7 @@ struct HomeTabView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                         .frame(height: 32)
+                        .offset(y: -8)
                 }
             }
         }
@@ -2187,9 +2260,20 @@ struct HomeTabView: View {
         }
         .onAppear {
             trackEvent("view_home")
+            remoteVideoVM.loadVideos()
         }
         .sheet(item: $selectedVideo) { video in
             LocalVideoPlayerView(video: video)
+        }
+        .sheet(isPresented: $showRemoteVideoList) {
+            RemoteVideoListView(
+                videos: remoteVideoListType == .aftermovie ? remoteVideoVM.aftermovieVideos : remoteVideoVM.tiktokVideos,
+                type: remoteVideoListType,
+                selectedVideo: $selectedRemoteVideo
+            )
+        }
+        .sheet(item: $selectedRemoteVideo) { video in
+            RemoteVideoPlayerView(video: video)
         }
     }
     
@@ -2209,7 +2293,7 @@ struct HomeTabView: View {
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 0)
+        .padding(.top, -20)
     }
     
     
@@ -2418,7 +2502,7 @@ struct HomeTabView: View {
         )
     }
     
-    // MARK: - Video Locali (Aftermovie & TikTok)
+    // MARK: - Video Remote (Aftermovie & TikTok)
     private var instagramSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -2433,11 +2517,21 @@ struct HomeTabView: View {
                 Spacer()
             }
             
-            // 2 colonne: Aftermovie | TikTok
+            // Pulsanti per aprire le liste dei video
             HStack(spacing: 12) {
-                ForEach(HZooConfig.videos) { video in
-                    videoCard(video: video)
-                }
+                remoteVideoButton(
+                    title: "AFTERMOVIE",
+                    icon: "film.fill",
+                    videos: remoteVideoVM.aftermovieVideos,
+                    type: .aftermovie
+                )
+                
+                remoteVideoButton(
+                    title: "TIKTOK",
+                    icon: "play.rectangle.fill", 
+                    videos: remoteVideoVM.tiktokVideos,
+                    type: .tiktok
+                )
             }
         }
         .padding(.vertical, 16)
@@ -2504,6 +2598,84 @@ struct HomeTabView: View {
                 
                 // Titolo video
                 Text(video.title)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(hex: "1a1a1a"))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(HZooConfig.primaryNeon.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    // MARK: - Remote Video Functions
+    private func remoteVideoButton(
+        title: String,
+        icon: String,
+        videos: [RemoteVideo],
+        type: LocalVideo.VideoType
+    ) -> some View {
+        Button(action: {
+            haptic(.medium)
+            remoteVideoListType = type
+            showRemoteVideoList = true
+        }) {
+            VStack(spacing: 0) {
+                // Thumbnail con play overlay
+                ZStack {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.8))
+                        .frame(height: 180)
+                        .overlay {
+                            VStack(spacing: 8) {
+                                Image(systemName: icon)
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(HZooConfig.primaryNeon)
+                                
+                                Text(title)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(HZooConfig.primaryNeon.opacity(0.2))
+                                    )
+                                
+                                // Badge con numero di video
+                                if !videos.isEmpty {
+                                    Text("\(videos.count) episodi")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.white.opacity(0.8))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .fill(Color.black.opacity(0.6))
+                                        )
+                                }
+                            }
+                        }
+                    
+                    // Play button overlay
+                    Circle()
+                        .fill(Color.black.opacity(0.7))
+                        .frame(width: 60, height: 60)
+                        .overlay {
+                            Image(systemName: "play.fill")
+                                .font(.title)
+                                .foregroundStyle(.white)
+                        }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                
+                // Titolo video
+                Text(title)
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white)
                     .padding(.vertical, 8)
@@ -2885,11 +3057,18 @@ private struct EventGameInfoRow: View {
 
 struct PrenotaTabView: View {
     @State private var showComingSoon = false
+    @State private var scrollOffset: CGFloat = 0
     @EnvironmentObject var locationManager: LocationManager
     
     var body: some View {
         NavigationStack {
             ScrollView {
+                GeometryReader { geometry in
+                    Color.clear
+                        .preference(key: ScrollOffsetPreferenceKey.self, value: geometry.frame(in: .named("scroll")).minY)
+                }
+                .frame(height: 0)
+                
                 VStack(spacing: 32) {
                     
                     // Tipologie di Tavoli
@@ -3022,9 +3201,24 @@ struct PrenotaTabView: View {
                 }
                 .padding(.bottom, 32)
             }
+            .coordinateSpace(name: "scroll")
+            .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                scrollOffset = value
+            }
             .background(HZooConfig.backgroundDark.ignoresSafeArea())
-            .navigationTitle("Tavolo")
+            .navigationTitle("Prenota un tavolo")
             .navigationBarTitleDisplayMode(.large)
+             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    if scrollOffset > -50 {
+                        Image("logoBianco")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 32)
+                            .offset(y: -8)
+                    }
+                }
+            }
             .onAppear {
                 let appearance = UINavigationBarAppearance()
                 appearance.configureWithTransparentBackground()
@@ -4049,29 +4243,11 @@ struct MinigameTabView: View {
         @EnvironmentObject var vm: PetViewModel
 
         var body: some View {
-            VStack(spacing: 16) {
-                // Header
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Obiettivi")
-                        .font(.largeTitle.bold())
-                        .foregroundStyle(.white)
-                        .padding(.top, 20)
-                    Text("Completa gli obiettivi per sbloccare ricompense e funzionalità. Si completano automaticamente quando soddisfi i requisiti.")
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.85))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
-
-                // Content
-                AchievementsTab()
-                    .environmentObject(vm)
-            }
-            .background(Color.black.opacity(0.45).ignoresSafeArea())
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            AchievementsTab()
+                .environmentObject(vm)
+                .background(Color.black.opacity(0.45).ignoresSafeArea())
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -4306,7 +4482,7 @@ private struct ConfettiBurst: View {
         @State private var filter: Filter = .all
 
         private enum Filter: String, CaseIterable { case all = "Tutti", todo = "Da sbloccare", done = "Sbloccati" }
-        private let cols = [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 12)]
+        private let cols = [GridItem(.adaptive(minimum: 160, maximum: 180), spacing: 12)]
 
         private var total: Int { AchievementsCatalog.all.count }
         private var done: Int { center.unlocked.count }
@@ -4321,38 +4497,41 @@ private struct ConfettiBurst: View {
         }
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(spacing: 20) {
                 // Header
-                HStack(spacing: 10) {
-                    Image(systemName: "medal.fill").foregroundStyle(.white)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Obiettivi").font(.title2.bold()).foregroundStyle(.white)
-                        Text("Sblocca badge giocando: mini-giochi, cura e progressi quotidiani.")
-                            .font(.footnote).foregroundStyle(.white.opacity(0.9))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Obiettivi")
+                        .font(.largeTitle.bold())
+                        .foregroundStyle(.white)
+                        .padding(.top, 20)
+                    
+                    Text("Completa gli obiettivi per sbloccare ricompense e funzionalità.")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.85))
+                    
+                    // Progress
+                    HStack {
+                        ProgressView(value: overall)
+                            .tint(.white)
+                            .scaleEffect(y: 1.5)
+                        
+                        Text("\(done)/\(total)")
+                            .font(.caption.bold())
+                            .foregroundStyle(.white)
+                            .padding(.leading, 8)
                     }
-                    Spacer()
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.seal.fill")
-                        Text("\(done)/\(total)").monospacedDigit().bold()
-                    }
-                    .font(.caption)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(.ultraThinMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
-                    .foregroundStyle(.white)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    ProgressView(value: overall).tint(.white)
-                    Text("Completati \(done) su \(total)")
-                        .font(.caption2).foregroundStyle(.white.opacity(0.85))
-                }
-
+                // Filter
                 Picker("Filtro", selection: $filter) {
                     ForEach(Filter.allCases, id: \.self) { f in Text(f.rawValue).tag(f) }
                 }
                 .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
 
+                // Grid
                 ScrollView(showsIndicators: true) {
                     LazyVGrid(columns: cols, spacing: 12) {
                         ForEach(data) { a in
@@ -4362,13 +4541,10 @@ private struct ConfettiBurst: View {
                                 .onTapGesture { withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { selected = a } }
                         }
                     }
-                    .padding(.top, 4)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
                 }
-                .frame(maxHeight: 440)
             }
-            .padding(16)
-            .background(shopSurface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(shopStroke, lineWidth: 1))
             .onAppear { AchievementsCenter.shared.attach(vm: vm); AchievementsCenter.shared.evaluateAll(vm: vm) }
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("El-PavoReal.achievementUnlocked"))) { _ in
                 withAnimation { showConfetti = true }
@@ -4379,6 +4555,8 @@ private struct ConfettiBurst: View {
                 AchDetailSheet(a: a,
                                progress: AchievementsCenter.shared.progressFraction(for: a.condition, vm: vm),
                                unlocked: AchievementsCenter.shared.isUnlocked(a.id))
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
         }
     }
@@ -4392,7 +4570,7 @@ private struct ConfettiBurst: View {
                 ZStack {
                     Circle().fill(LinearGradient(colors: achievement.colors, startPoint: .topLeading, endPoint: .bottomTrailing))
                         .overlay(Circle().stroke(Color.white.opacity(0.22), lineWidth: 1))
-                        .frame(width: 82, height: 82)
+                        .frame(width: 80, height: 80)
                         .saturation(unlocked ? 1 : 0)
                         .opacity(unlocked ? 1 : 0.55)
                         .scaleEffect(unlocked ? 1.0 : 0.95)
@@ -4401,7 +4579,7 @@ private struct ConfettiBurst: View {
                     if !unlocked {
                         Circle()
                             .trim(from: 0, to: CGFloat(max(0.08, min(1.0, progress))))
-                            .stroke(style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                            .stroke(style: StrokeStyle(lineWidth: 5, lineCap: .round))
                             .fill(.white.opacity(0.75))
                             .rotationEffect(.degrees(-90))
                             .frame(width: 90, height: 90)
@@ -4409,22 +4587,21 @@ private struct ConfettiBurst: View {
                     }
                 }
                 Text(achievement.title)
-                    .font(.title3.bold())
+                    .font(.subheadline.bold())
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.82)
-                Text(unlocked ? "Sbloccato" : "Progresso: \(Int(round(progress*100)))%")
-                    .font(.footnote.weight(.semibold))
+                    .minimumScaleFactor(0.8)
+                Text(unlocked ? "Sbloccato" : "\(Int(round(progress*100)))%")
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.9)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(10)
-            .frame(height: 176)
+            .frame(maxWidth: .infinity)
+            .padding(12)
+            .frame(height: 160)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
         }
     }
 
@@ -4437,26 +4614,60 @@ private struct ConfettiBurst: View {
             NavigationStack {
                 ZStack {
                     Color.black.opacity(0.45).ignoresSafeArea()
-                    ScrollView { VStack(alignment: .leading, spacing: 14) {
-                        HStack(spacing: 10) {
-                            ZStack { Circle().fill(LinearGradient(colors: a.colors, startPoint: .topLeading, endPoint: .bottomTrailing)).frame(width: 48, height: 48); Image(systemName: a.icon).foregroundStyle(.white) }
-                            VStack(alignment: .leading, spacing: 4) { Text(a.title).font(.title3.bold()).foregroundStyle(.white); Text(a.desc).font(.footnote).foregroundStyle(.white.opacity(0.9)) }
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack(spacing: 12) {
+                            ZStack { 
+                                Circle().fill(LinearGradient(colors: a.colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .frame(width: 60, height: 60)
+                                Image(systemName: a.icon)
+                                    .font(.title2)
+                                    .foregroundStyle(.white) 
+                            }
+                            VStack(alignment: .leading, spacing: 4) { 
+                                Text(a.title)
+                                    .font(.title2.bold())
+                                    .foregroundStyle(.white)
+                                Text(a.desc)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.white.opacity(0.9))
+                            }
                             Spacer()
                         }
+                        
                         VStack(alignment: .leading, spacing: 8) {
-                            ProgressView(value: min(1, progress)).tint(.white)
-                            Text(unlocked ? "Completato" : "Progresso: \(Int(progress*100))%")
-                                .font(.caption).foregroundStyle(.white.opacity(0.9))
+                            ProgressView(value: min(1, progress))
+                                .tint(.white)
+                                .scaleEffect(y: 1.5)
+                            Text(unlocked ? "✅ Completato" : "Progresso: \(Int(progress*100))%")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.9))
                         }
-                        .padding(.top, 4)
+                        
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("Come sbloccarlo").font(.headline).foregroundStyle(.white)
-                            Text(hintText).font(.footnote).foregroundStyle(.white.opacity(0.9))
+                            Text("Come sbloccarlo")
+                                .font(.headline)
+                                .foregroundStyle(.white)
+                            Text(hintText)
+                                .font(.subheadline)
+                                .foregroundStyle(.white.opacity(0.9))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                    }.padding(16) }
+                        
+                        Spacer()
+                    }
+                    .padding(20)
                 }
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button { dismiss() } label: { Image(systemName: "xmark.circle.fill") } } }
-                .navigationTitle("Dettagli obiettivo").navigationBarTitleDisplayMode(.inline)
+                .toolbar { 
+                    ToolbarItem(placement: .topBarTrailing) { 
+                        Button { dismiss() } label: { 
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
+                                .foregroundStyle(.white.opacity(0.8))
+                        } 
+                    } 
+                }
+                .navigationTitle("Dettagli obiettivo")
+                .navigationBarTitleDisplayMode(.inline)
             }
         }
         private var hintText: String {
@@ -4765,9 +4976,7 @@ fileprivate struct StatTile: View {
             }
             .onLongPressGesture {
                 // Solo se NON c'è cooldown attivo
-                if isLocked("El-PavoReal.drinkNextReadyAt") {
-                    haptic(.heavy)
-                } else {
+                if !isLocked("El-PavoReal.drinkNextReadyAt") {
                     quickPickKind = .drink
                     haptic(.medium)
                 }
@@ -4790,9 +4999,7 @@ fileprivate struct StatTile: View {
             }
             .onLongPressGesture {
                 // Solo se NON c'è cooldown attivo
-                if isLocked("El-PavoReal.coffeeNextReadyAt") {
-                    haptic(.heavy)
-                } else {
+                if !isLocked("El-PavoReal.coffeeNextReadyAt") {
                     quickPickKind = .shot
                     haptic(.medium)
                 }
@@ -4816,9 +5023,7 @@ fileprivate struct StatTile: View {
             }
             .onLongPressGesture {
                 // Solo se NON c'è cooldown attivo
-                if isLocked("El-PavoReal.cleanNextReadyAt") {
-                    haptic(.heavy)
-                } else {
+                if !isLocked("El-PavoReal.cleanNextReadyAt") {
                     quickPickKind = .relax
                     haptic(.medium)
                 }
@@ -4841,9 +5046,7 @@ fileprivate struct StatTile: View {
             }
             .onLongPressGesture {
                 // Solo se NON c'è cooldown attivo
-                if isLocked("El-PavoReal.meetNextReadyAt") {
-                    haptic(.heavy)
-                } else {
+                if !isLocked("El-PavoReal.meetNextReadyAt") {
                     quickPickKind = .sigla
                     haptic(.medium)
                 }
@@ -5739,18 +5942,24 @@ private func computedMood(for vm: PetViewModel) -> MoodState {
     let minStat = min(vm.satiety, vm.energy, vm.hygiene, vm.happiness)
     let avgStat = (vm.satiety + vm.energy + vm.hygiene + vm.happiness) / 4.0
 
+    // Priorità 1: CRITICO (emergenza assoluta)
     if vm.life < 20 || minStat < 12 { return .critico }
 
+    // Priorità 2: FELICE (tutto va bene)
     if (minStat >= 65 && vm.life >= 55) || (avgStat >= 72 && vm.life >= 50) {
         return .felice
     }
 
-    if vm.energy < 32 { return .stanchezza }
-    if vm.happiness < 28 && (vm.satiety < 35 || vm.hygiene < 35) { return .rabbia }
+    // Priorità 3: RABBIA (felicità molto bassa)
+    if vm.happiness < 30 { return .rabbia }
 
-    // NOIA: solo se felicità molto bassa E altre stats non sono buone
+    // Priorità 4: STANCHEZZA (energia bassa)
+    if vm.energy < 32 { return .stanchezza }
+
+    // Priorità 5: NOIA (felicità bassa ma non disperata + altre stats non buone)
     if vm.happiness < 35 && avgStat < 50 { return .noia }
 
+    // Default: NEUTRO
     return .neutro
 }
 
@@ -10087,7 +10296,7 @@ struct ContentView: View {
             MinigameTabView()
                 .tabItem {
                     Image(systemName: "gamecontroller.fill")
-                    Text("Pavogotchi")
+                    Text("Minigame")
                 }
                 .tag(3)
             
@@ -10153,10 +10362,17 @@ struct ContentView: View {
 
 // MARK: - Prezzi View (Originale Meravigliosa)
 struct PrezziView: View {
+    @State private var scrollOffset: CGFloat = 0
     
     var body: some View {
         NavigationStack {
             ScrollView {
+                GeometryReader { geometry in
+                    Color.clear
+                        .preference(key: ScrollOffsetPreferenceKey.self, value: geometry.frame(in: .named("scroll")).minY)
+                }
+                .frame(height: 0)
+                
                 VStack(spacing: 24) {
                     
                     // Prezzi Ingresso
@@ -10220,9 +10436,24 @@ struct PrezziView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 32)
             }
+            .coordinateSpace(name: "scroll")
+            .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+                scrollOffset = value
+            }
             .background(Color.black.ignoresSafeArea())
             .navigationTitle("Prezzi")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    if scrollOffset > -50 {
+                        Image("logoBianco")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 32)
+                            .offset(y: -8)
+                    }
+                }
+            }
             .onAppear {
                 let appearance = UINavigationBarAppearance()
                 appearance.configureWithTransparentBackground()
@@ -10690,6 +10921,187 @@ struct ScrollOffsetPreferenceKey: PreferenceKey {
     
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
+    }
+}
+
+// MARK: - 🎬 Remote Video Views
+struct RemoteVideoListView: View {
+    let videos: [RemoteVideo]
+    let type: LocalVideo.VideoType
+    @Binding var selectedVideo: RemoteVideo?
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.opacity(0.45).ignoresSafeArea()
+                
+                if videos.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: type == .aftermovie ? "film.fill" : "play.rectangle.fill")
+                            .font(.system(size: 60))
+                            .foregroundStyle(HZooConfig.primaryNeon.opacity(0.6))
+                        
+                        Text("Nessun video disponibile")
+                            .font(.title2.bold())
+                            .foregroundStyle(.white)
+                        
+                        Text("I nuovi video saranno disponibili presto!")
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(40)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 16) {
+                            ForEach(videos) { video in
+                                RemoteVideoRow(video: video, selectedVideo: $selectedVideo)
+                            }
+                        }
+                        .padding(20)
+                    }
+                }
+            }
+            .navigationTitle(type == .aftermovie ? "AFTERMOVIE" : "TIKTOK")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Chiudi") {
+                        dismiss()
+                    }
+                    .foregroundStyle(.white)
+                }
+            }
+        }
+    }
+}
+
+struct RemoteVideoRow: View {
+    let video: RemoteVideo
+    @Binding var selectedVideo: RemoteVideo?
+    
+    var body: some View {
+        Button(action: {
+            selectedVideo = video
+        }) {
+            HStack(spacing: 12) {
+                // Thumbnail
+                AsyncImage(url: URL(string: video.thumbnail)) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    Rectangle()
+                        .fill(Color.black.opacity(0.8))
+                        .overlay {
+                            Image(systemName: "play.rectangle.fill")
+                                .font(.title)
+                                .foregroundStyle(HZooConfig.primaryNeon.opacity(0.6))
+                        }
+                }
+                .frame(width: 80, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                
+                // Info
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(video.title)
+                        .font(.headline.bold())
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                    
+                    Text(video.description)
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.8))
+                        .lineLimit(2)
+                    
+                    HStack(spacing: 12) {
+                        Label(video.date, systemImage: "calendar")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.6))
+                        
+                        Label(video.duration, systemImage: "clock")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                
+                Spacer()
+                
+                // Play button
+                Circle()
+                    .fill(HZooConfig.primaryNeon.opacity(0.2))
+                    .frame(width: 40, height: 40)
+                    .overlay {
+                        Image(systemName: "play.fill")
+                            .font(.callout)
+                            .foregroundStyle(HZooConfig.primaryNeon)
+                    }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+            )
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+}
+
+struct RemoteVideoPlayerView: View {
+    let video: RemoteVideo
+    @Environment(\.dismiss) private var dismiss
+    @State private var player: AVPlayer?
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                
+                if let player = player {
+                    VideoPlayer(player: player)
+                        .onAppear {
+                            player.play()
+                        }
+                        .onDisappear {
+                            player.pause()
+                        }
+                } else {
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        
+                        Text("Caricamento video...")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+            .navigationTitle(video.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Chiudi") {
+                        player?.pause()
+                        dismiss()
+                    }
+                    .foregroundStyle(.white)
+                }
+            }
+            .onAppear {
+                if let url = URL(string: video.videoUrl) {
+                    player = AVPlayer(url: url)
+                }
+            }
+            .onDisappear {
+                player?.pause()
+                player = nil
+            }
+        }
     }
 }
 
