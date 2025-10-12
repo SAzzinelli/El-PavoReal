@@ -27,6 +27,9 @@ struct El_PavoRealApp: App {
                 }
             }
             .onAppear {
+                // Pulisci cache URLSession per video remoti
+                URLCache.shared.removeAllCachedResponses()
+                
                 // Mostra la splash per 2 secondi
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
                     withAnimation(.easeOut(duration: 0.5)) {
