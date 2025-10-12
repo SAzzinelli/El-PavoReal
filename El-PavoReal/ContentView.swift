@@ -2272,7 +2272,7 @@ struct HomeTabView: View {
                 selectedVideo: $selectedRemoteVideo
             )
         }
-        .sheet(item: $selectedRemoteVideo) { video in
+        .fullScreenCover(item: $selectedRemoteVideo) { video in
             RemoteVideoPlayerView(video: video)
         }
     }
@@ -10980,10 +10980,14 @@ struct RemoteVideoListView: View {
 struct RemoteVideoRow: View {
     let video: RemoteVideo
     @Binding var selectedVideo: RemoteVideo?
+    @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         Button(action: {
-            selectedVideo = video
+            dismiss()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                selectedVideo = video
+            }
         }) {
             HStack(spacing: 12) {
                 // Thumbnail
