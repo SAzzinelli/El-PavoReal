@@ -8,29 +8,29 @@
       "videoUrl": "https://SAzzinelli.github.io/El-PavoReal/videos/aftermovie1.mp4",
       "date": "3 Ottobre 2025",
       "duration": "2:30",
-      "shareUrl": "https://instagram.com/p/ABC123"
+      "shareUrl": "https://www.instagram.com/p/DPjlqymDUI7/"
     }
   ],
-  "tiktok": [
+  "backstage": [
     {
-      "id": "tiktok1",
+      "id": "backstage1",
       "title": "Ep. 1 - L'apertura",
       "description": "È l'esordio di una stagione con noi. Benvenuti nel dietro le quinte 🎭",
-      "thumbnail": "https://SAzzinelli.github.io/El-PavoReal/thumbnails/tiktok1.jpg",
-      "videoUrl": "https://SAzzinelli.github.io/El-PavoReal/videos/tiktok1.mp4",
+      "thumbnail": "https://SAzzinelli.github.io/El-PavoReal/thumbnails/backstage1.jpg",
+      "videoUrl": "https://SAzzinelli.github.io/El-PavoReal/videos/backstage1.mp4",
       "date": "3 Ottobre 2025",
       "duration": "0:45",
-      "shareUrl": "https://instagram.com/p/DEF456"
+      "shareUrl": "https://www.instagram.com/p/DPg55SXjbEL/"
     },
     {
-      "id": "tiktok2",
+      "id": "backstage2",
       "title": "Episodio 2 - Mille bolle blu",
       "description": "La banda di Hzoo scopre nuovi effetti speciali, nel frattempo delle misteriose fotocamere compaiono al Pavoreal",
-      "thumbnail": "https://SAzzinelli.github.io/El-PavoReal/thumbnails/tiktok2.jpg",
-      "videoUrl": "https://SAzzinelli.github.io/El-PavoReal/videos/tiktok2.mp4",
+      "thumbnail": "https://SAzzinelli.github.io/El-PavoReal/thumbnails/backstage2.jpg",
+      "videoUrl": "https://SAzzinelli.github.io/El-PavoReal/videos/backstage2.mp4",
       "date": "10 Ottobre 2025",
       "duration": "1:15",
-      "shareUrl": "https://instagram.com/p/GHI789"
+      "shareUrl": "https://www.instagram.com/p/DPuByhGjWQt/"
     }
   ]
 }

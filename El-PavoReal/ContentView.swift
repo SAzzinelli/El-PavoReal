@@ -99,7 +99,7 @@ struct LocalVideo: Identifiable {
     
     enum VideoType {
         case aftermovie
-        case tiktok
+        case backstage
     }
 }
 
@@ -117,7 +117,7 @@ struct RemoteVideo: Identifiable, Codable {
 
 struct RemoteVideoResponse: Codable {
     let aftermovie: [RemoteVideo]
-    let tiktok: [RemoteVideo]
+    let backstage: [RemoteVideo]
 }
 
 // MARK: - 🎮 Minigame Dynamic Configuration
@@ -493,11 +493,11 @@ struct HZooConfig {
             type: .aftermovie
         ),
         LocalVideo(
-            id: "tiktok1",
+            id: "backstage1",
             title: "EP.1 - L'APERTURA",
-            videoName: "tiktok1", // File: tiktok1.mp4 in Assets
-            thumbnailName: "tiktok1_thumb", // File: tiktok1_thumb.jpg/png in Assets
-            type: .tiktok
+            videoName: "backstage1", // File: backstage1.mp4 in Assets
+            thumbnailName: "backstage1_thumb", // File: backstage1_thumb.jpg/png in Assets
+            type: .backstage
         )
     ]
     
@@ -2054,7 +2054,7 @@ class HZooCountdownViewModel: ObservableObject {
 // MARK: - 🎬 Remote Video ViewModel (GitHub Pages)
 class RemoteVideoViewModel: ObservableObject {
     @Published var aftermovieVideos: [RemoteVideo] = []
-    @Published var tiktokVideos: [RemoteVideo] = []
+    @Published var backstageVideos: [RemoteVideo] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
     
@@ -2093,7 +2093,7 @@ class RemoteVideoViewModel: ObservableObject {
                 do {
                     let response = try JSONDecoder().decode(RemoteVideoResponse.self, from: data)
                     self?.aftermovieVideos = response.aftermovie
-                    self?.tiktokVideos = response.tiktok
+                    self?.backstageVideos = response.backstage
                 } catch {
                     self?.errorMessage = "Errore nel parsing JSON: \(error.localizedDescription)"
                 }
@@ -2274,7 +2274,7 @@ struct HomeTabView: View {
         }
         .sheet(isPresented: $showRemoteVideoList) {
             RemoteVideoListView(
-                videos: remoteVideoListType == .aftermovie ? remoteVideoVM.aftermovieVideos : remoteVideoVM.tiktokVideos,
+                videos: remoteVideoListType == .aftermovie ? remoteVideoVM.aftermovieVideos : remoteVideoVM.backstageVideos,
                 type: remoteVideoListType,
                 selectedVideo: $selectedRemoteVideo
             )
@@ -2534,10 +2534,10 @@ struct HomeTabView: View {
                 )
                 
                 remoteVideoButton(
-                    title: "TIKTOK",
+                    title: "BACKSTAGE",
                     icon: "play.rectangle.fill", 
-                    videos: remoteVideoVM.tiktokVideos,
-                    type: .tiktok
+                    videos: remoteVideoVM.backstageVideos,
+                    type: .backstage
                 )
             }
         }
