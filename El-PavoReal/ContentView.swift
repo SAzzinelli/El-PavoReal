@@ -2063,13 +2063,19 @@ class RemoteVideoViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         
-        guard let url = URL(string: HZooConfig.remoteVideosURL) else {
+        // Add timestamp to bypass cache
+        let urlString = HZooConfig.remoteVideosURL + "?t=\(Date().timeIntervalSince1970)"
+        guard let url = URL(string: urlString) else {
             errorMessage = "URL non valido"
             isLoading = false
             return
         }
         
-        urlSession.dataTask(with: url) { [weak self] data, response, error in
+        // Configure request to bypass cache
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        
+        urlSession.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
                 self?.isLoading = false
                 
