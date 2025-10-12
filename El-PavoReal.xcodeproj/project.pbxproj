@@ -261,7 +261,6 @@
 				DEVELOPMENT_TEAM = 9747WYS86R;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "El-PavoReal/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "El-PavoReal";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -302,7 +301,6 @@
 				DEVELOPMENT_TEAM = 9747WYS86R;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "El-PavoReal/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "El-PavoReal";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
