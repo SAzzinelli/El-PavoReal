@@ -480,7 +480,7 @@ struct HZooConfig {
     static let tiktokURL = "https://www.tiktok.com/@elpavorealofficial"
     
     // Video Remote (GitHub Pages)
-    static let remoteVideosURL = "https://SAzzinelli.github.io/videos.json"
+    static let remoteVideosURL = "https://SAzzinelli.github.io/El-PavoReal/videos.json"
     
     // Video Locali (fallback)
     static let localVideos: [LocalVideo] = [

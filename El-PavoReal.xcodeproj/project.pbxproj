@@ -10,9 +10,22 @@
 		FCE9463F2E59D3E900490D79 /* El-PavoReal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "El-PavoReal.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		FC0833912E9C3660009FB39B /* Exceptions for "El-PavoReal" folder in "El-PavoReal" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = FCE9463E2E59D3E900490D79 /* El-PavoReal */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		FCE946412E59D3E900490D79 /* El-PavoReal */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				FC0833912E9C3660009FB39B /* Exceptions for "El-PavoReal" folder in "El-PavoReal" target */,
+			);
 			path = "El-PavoReal";
 			sourceTree = "<group>";
 		};
@@ -261,8 +274,11 @@
 				DEVELOPMENT_TEAM = 9747WYS86R;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "El-PavoReal/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "El-PavoReal";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Questa app ha bisogno della camera per scattare foto";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Questa app ha bisogno della tua posizione per mostrarti i tavoli più vicini";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -275,10 +291,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1;
+				NSCameraUsageDescription = "Questa app ha bisogno della camera per scattare foto";
+				NSLocationWhenInUseUsageDescription = "Questa app ha bisogno della tua posizione per mostrarti i tavoli più vicini";
 				PRODUCT_BUNDLE_IDENTIFIER = com.simoneazzinelli.pavogotchi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				"NSLocationWhenInUseUsageDescription" = "Questa app ha bisogno della tua posizione per mostrarti i tavoli più vicini";
-				"NSCameraUsageDescription" = "Questa app ha bisogno della camera per scattare foto";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -303,8 +319,11 @@
 				DEVELOPMENT_TEAM = 9747WYS86R;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "El-PavoReal/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "El-PavoReal";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Questa app ha bisogno della camera per scattare foto";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Questa app ha bisogno della tua posizione per mostrarti i tavoli più vicini";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -317,10 +336,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1;
+				NSCameraUsageDescription = "Questa app ha bisogno della camera per scattare foto";
+				NSLocationWhenInUseUsageDescription = "Questa app ha bisogno della tua posizione per mostrarti i tavoli più vicini";
 				PRODUCT_BUNDLE_IDENTIFIER = com.simoneazzinelli.pavogotchi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				"NSLocationWhenInUseUsageDescription" = "Questa app ha bisogno della tua posizione per mostrarti i tavoli più vicini";
-				"NSCameraUsageDescription" = "Questa app ha bisogno della camera per scattare foto";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
