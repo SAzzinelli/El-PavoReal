@@ -112,6 +112,7 @@ struct RemoteVideo: Identifiable, Codable {
     let videoUrl: String // URL del video
     let date: String
     let duration: String
+    let shareUrl: String // URL da condividere (Instagram)
 }
 
 struct RemoteVideoResponse: Codable {
@@ -2632,52 +2633,40 @@ struct HomeTabView: View {
             showRemoteVideoList = true
         }) {
             VStack(spacing: 0) {
-                // Thumbnail con play overlay
-                ZStack {
-                    Rectangle()
-                        .fill(Color.black.opacity(0.8))
-                        .frame(height: 180)
-                        .overlay {
-                            VStack(spacing: 8) {
-                                Image(systemName: icon)
-                                    .font(.system(size: 40))
-                                    .foregroundStyle(HZooConfig.primaryNeon)
-                                
-                                Text(title)
-                                    .font(.caption.weight(.bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
+                // Thumbnail senza play overlay
+                Rectangle()
+                    .fill(Color.black.opacity(0.8))
+                    .frame(height: 180)
+                    .overlay {
+                        VStack(spacing: 8) {
+                            Image(systemName: icon)
+                                .font(.system(size: 40))
+                                .foregroundStyle(HZooConfig.primaryNeon)
+                            
+                            Text(title)
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(HZooConfig.primaryNeon.opacity(0.2))
+                                )
+                            
+                            // Badge con numero di video
+                            if !videos.isEmpty {
+                                Text("\(videos.count) episodi")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.white.opacity(0.8))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
                                     .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(HZooConfig.primaryNeon.opacity(0.2))
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(Color.black.opacity(0.6))
                                     )
-                                
-                                // Badge con numero di video
-                                if !videos.isEmpty {
-                                    Text("\(videos.count) episodi")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(.white.opacity(0.8))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6)
-                                                .fill(Color.black.opacity(0.6))
-                                        )
-                                }
                             }
                         }
-                    
-                    // Play button overlay
-                    Circle()
-                        .fill(Color.black.opacity(0.7))
-                        .frame(width: 60, height: 60)
-                        .overlay {
-                            Image(systemName: "play.fill")
-                                .font(.title)
-                                .foregroundStyle(.white)
-                        }
-                }
+                    }
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 
                 // Titolo video
@@ -11066,6 +11055,7 @@ struct RemoteVideoPlayerView: View {
     let video: RemoteVideo
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
+    @State private var showShareSheet = false
     
     var body: some View {
         NavigationStack {
@@ -11094,12 +11084,25 @@ struct RemoteVideoPlayerView: View {
             .navigationTitle(video.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Chiudi") {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: {
                         player?.pause()
                         dismiss()
+                    }) {
+                        Image(systemName: "chevron.left")
+                            .font(.title2)
+                            .foregroundStyle(.white)
                     }
-                    .foregroundStyle(.white)
+                }
+                
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(action: {
+                        shareVideo()
+                    }) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.title2)
+                            .foregroundStyle(.white)
+                    }
                 }
             }
             .onAppear {
@@ -11111,7 +11114,26 @@ struct RemoteVideoPlayerView: View {
                 player?.pause()
                 player = nil
             }
+            .sheet(isPresented: $showShareSheet) {
+                ShareSheet(items: [video.shareUrl])
+            }
         }
     }
+    
+    private func shareVideo() {
+        showShareSheet = true
+    }
+}
+
+// MARK: - ShareSheet Helper
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 

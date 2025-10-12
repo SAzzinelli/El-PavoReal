@@ -7,7 +7,8 @@
       "thumbnail": "https://SAzzinelli.github.io/El-PavoReal/thumbnails/aftermovie1.jpg",
       "videoUrl": "https://SAzzinelli.github.io/El-PavoReal/videos/aftermovie1.mp4",
       "date": "3 Ottobre 2025",
-      "duration": "2:30"
+      "duration": "2:30",
+      "shareUrl": "https://instagram.com/p/ABC123"
     }
   ],
   "tiktok": [
@@ -18,7 +19,8 @@
       "thumbnail": "https://SAzzinelli.github.io/El-PavoReal/thumbnails/tiktok1.jpg",
       "videoUrl": "https://SAzzinelli.github.io/El-PavoReal/videos/tiktok1.mp4",
       "date": "3 Ottobre 2025",
-      "duration": "0:45"
+      "duration": "0:45",
+      "shareUrl": "https://instagram.com/p/DEF456"
     },
     {
       "id": "tiktok2",
@@ -27,7 +29,8 @@
       "thumbnail": "https://SAzzinelli.github.io/El-PavoReal/thumbnails/tiktok2.jpg",
       "videoUrl": "https://SAzzinelli.github.io/El-PavoReal/videos/tiktok2.mp4",
       "date": "10 Ottobre 2025",
-      "duration": "1:15"
+      "duration": "1:15",
+      "shareUrl": "https://instagram.com/p/GHI789"
     }
   ]
 }
