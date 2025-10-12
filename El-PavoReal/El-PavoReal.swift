@@ -11,12 +11,14 @@ import SwiftUI
 struct El_PavoRealApp: App {
     @State private var showSplash = true
     @StateObject private var minigameManager = MinigameManager.shared
+    @StateObject private var locationManager = LocationManager()
     
     var body: some Scene {
         WindowGroup {
             ZStack {
                 ContentView()
                     .environmentObject(minigameManager)
+                    .environmentObject(locationManager)
                 
                 if showSplash {
                     SplashView()
@@ -34,6 +36,9 @@ struct El_PavoRealApp: App {
                 
                 // Fetch configurazione minigame
                 minigameManager.fetchConfigIfNeeded()
+                
+                // Avvia location tracking
+                locationManager.startLocationUpdates()
             }
         }
     }

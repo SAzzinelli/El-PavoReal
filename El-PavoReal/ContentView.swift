@@ -2039,6 +2039,54 @@ struct HomeTabView: View {
     @EnvironmentObject var locationManager: LocationManager
     @State private var selectedVideo: LocalVideo?
     @State private var scrollOffset: CGFloat = 0
+    
+    // MARK: - Scaling Header Variables
+    @State private var contentFrame: CGRect = .zero
+    
+    private let maxHeaderHeight: CGFloat = 200
+    private let minHeaderHeight: CGFloat = 100
+    
+    // MARK: - Scaling Header Functions
+    private func getOffsetForHeader() -> CGFloat {
+        let offset = abs(scrollOffset)
+        let extraSpace = maxHeaderHeight - minHeaderHeight
+        
+        if offset < extraSpace {
+            return 0
+        }
+        return offset - extraSpace
+    }
+    
+    private func getHeaderHeight() -> CGFloat {
+        let offset = abs(scrollOffset)
+        let scalingRange: CGFloat = 100
+        
+        if offset < scalingRange {
+            return maxHeaderHeight - (offset * (maxHeaderHeight - minHeaderHeight) / scalingRange)
+        }
+        return minHeaderHeight
+    }
+    
+    private func getHeaderScale() -> CGFloat {
+        let offset = abs(scrollOffset)
+        let scalingRange: CGFloat = 100
+        
+        if offset < scalingRange {
+            let scale = 1.0 - (offset / scalingRange) * 0.3 // Scala da 1.0 a 0.7
+            return max(0.7, scale)
+        }
+        return 0.7
+    }
+    
+    private var contentOffset: CGFloat {
+        let offset = abs(scrollOffset)
+        let extraSpace = maxHeaderHeight - minHeaderHeight
+        
+        if offset < extraSpace {
+            return 0
+        }
+        return offset - extraSpace
+    }
     @State private var timerGlow = false
     @State private var showLocationPermissionAlert = false
     @Environment(\.scenePhase) private var scenePhase
@@ -2060,35 +2108,19 @@ struct HomeTabView: View {
         NavigationStack {
             ZStack(alignment: .top) {
                 ScrollView(showsIndicators: false) {
-                    GeometryReader { geometry in
-                        Color.clear.preference(key: ScrollOffsetPreferenceKey.self, value: geometry.frame(in: .named("scroll")).minY)
-                    }
-                    .frame(height: 0)
-                    
+                    // Contenuto principale
                     VStack(spacing: 20) {
-                        // Spacer per banner fissi se presenti (solo Dynamic Island e Serata in Corso)
-                        if countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio {
-                            let dynamicIslandHeight: CGFloat = 60
-                            let serataBannerHeight: CGFloat = 100 // Aggiornato per nuovo gradiente unificato
-                            let totalHeight = dynamicIslandHeight + serataBannerHeight
-                            
-                            Color.clear.frame(height: totalHeight)
-                        }
+                    // Hero Section
+                    heroSection
+                        .padding(.top, 8)
+                        .padding(.top, 44) // Safe area per navigation bar
                         
-                        // Hero Section
-                        heroSection
-                            .padding(.top, (countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio) ? 0 : 8)
-                        
-                        
-                        // Evento Questo Venerdì (sempre visibile)
+                        // Evento Questo Venerdì (scaling header)
                         thisWeekEventSection
-                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .scaleEffect(getHeaderScale(), anchor: .top)
+                            .frame(height: getHeaderHeight())
+                            .clipped()
                         
-                        // Omaggio Donna (solo durante serata o debug) - SOTTO QUESTO VENERDI
-                        if (countdownVM.isEventActive && countdownVM.showLadiesFreeBadge) || debugTestBanner || debugTestSerataOmaggio {
-                            ladiesFreeCard
-                                .transition(.move(edge: .top).combined(with: .opacity))
-                        }
                         
                         // Micro-quote (solo 1:30-2:00 durante serata o debug)
                         if countdownVM.showSiglaQuote || debugTestSigla {
@@ -2135,19 +2167,18 @@ struct HomeTabView: View {
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: countdownVM.isEventActive)
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: countdownVM.showSiglaQuote)
                 
-                // Banner "Serata in Corso" (sempre visibile in alto se attivo o debug)
-                if countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio {
-                    serataInCorsoBanner
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                
-                // MARK: - Dynamic Scroll Gradient (come iOS Musica) - DEVE ESSERE L'ULTIMO
-                ScrollGradientOverlay(
-                    scrollOffset: scrollOffset,
-                    isEventActive: countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio
-                )
             }
             .background(Color.black.ignoresSafeArea())
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Image("logoBianco")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 32)
+                }
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -2162,73 +2193,6 @@ struct HomeTabView: View {
         }
     }
     
-    // MARK: - Banner Serata in Corso
-    private var serataInCorsoBanner: some View {
-        VStack(spacing: 0) {
-            // Gradiente che continua sopra il banner per nascondere il contenuto sottostante
-            LinearGradient(
-                colors: [
-                    HZooConfig.primaryNeon,
-                    HZooConfig.primaryNeon.opacity(0.95),
-                    HZooConfig.primaryNeon.opacity(0.9),
-                    HZooConfig.primaryNeon.opacity(0.8),
-                    HZooConfig.primaryNeon.opacity(0.6),
-                    HZooConfig.primaryNeon.opacity(0.4),
-                    Color.clear
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .frame(height: 100)
-            .ignoresSafeArea(.container, edges: .top)
-            .overlay(alignment: .bottom) {
-                // Contenuto del banner sovrapposto al gradiente
-                HStack(spacing: 12) {
-                    Circle()
-                        .fill(HZooConfig.primaryNeon)
-                        .frame(width: 10, height: 10)
-                        .modifier(PulsingDot())
-                    
-                    Text("SERATA IN CORSO")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(.white)
-                    
-                    Spacer()
-                    
-                    if countdownVM.showLadiesFreeBadge || debugTestSerataOmaggio {
-                        HStack(spacing: 6) {
-                            Image(systemName: "sparkles")
-                                .font(.caption)
-                            Text("Omaggio ♀ scade tra \(debugTestSerataOmaggio ? "01:00" : countdownVM.ladiesCountdown)")
-                                .font(.caption.weight(.medium))
-                        }
-                        .foregroundStyle(HZooConfig.accentCyan)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
-                .background(
-                    Rectangle()
-                        .fill(HZooConfig.primaryNeon.opacity(0.3))
-                        .overlay(
-                            Rectangle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [HZooConfig.primaryNeon.opacity(0.5), .clear],
-                                        startPoint: .leading,
-                                        endPoint: .trailing
-                                    )
-                                )
-                        )
-                )
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(HZooConfig.primaryNeon)
-                        .frame(height: 1)
-                }
-            }
-        }
-    }
     
     // MARK: - Hero
     private var heroSection: some View {
@@ -2240,13 +2204,14 @@ struct HomeTabView: View {
                 .shadow(color: HZooConfig.primaryNeon.opacity(0.3), radius: 8, x: 0, y: 4)
             
             Text("Il venerdì del PavoReal")
-                .font(.subheadline.weight(.medium))
+                .font(.title2.weight(.medium))
                 .foregroundStyle(.white)
-                .padding(.top, 4)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
+        .padding(.vertical, 0)
     }
+    
     
     // MARK: - Sigla Quote (1:30-2:00)
     private var siglaQuoteSection: some View {
@@ -2321,10 +2286,27 @@ struct HomeTabView: View {
     private var thisWeekEventSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("QUESTO VENERDÌ")
-                    .font(.caption.weight(.semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.7))
+                // Titolo dinamico
+                if countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio {
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(HZooConfig.primaryNeon)
+                            .frame(width: 10, height: 10)
+                            .modifier(PulsingDot())
+                        
+                        Text("SERATA IN CORSO")
+                            .font(.caption.weight(.bold))
+                            .tracking(0.8)
+                            .foregroundStyle(HZooConfig.primaryNeon)
+                        
+                        Spacer()
+                    }
+                } else {
+                    Text("QUESTO VENERDÌ")
+                        .font(.caption.weight(.semibold))
+                        .tracking(0.8)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
                 
                 HStack(spacing: 8) {
                     Text("H-ZOO #\(countdownVM.nextEventNumber)")
@@ -2343,24 +2325,47 @@ struct HomeTabView: View {
             Divider()
                 .background(Color.white.opacity(0.1))
             
-            // Info rapide
+            // Info rapide - adattate per serata in corso
             VStack(spacing: 12) {
-                quickInfoRow(icon: "clock.fill", text: "Start ore 23:00", color: HZooConfig.accentCyan)
-                quickInfoRow(icon: "eurosign.circle.fill", text: "♂ \(HZooConfig.priceMan) · ♀ \(HZooConfig.priceLadyBefore) entro 00:30", color: .green)
-                quickInfoRow(icon: "mappin.circle.fill", text: "\(HZooConfig.venueName) \(HZooConfig.venueLocation)", color: .orange)
+                if countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio {
+                    // Durante la serata: solo info essenziali
+                    quickInfoRow(icon: "eurosign.circle.fill", text: "♂ \(HZooConfig.priceMan) · ♀ \(HZooConfig.priceLadyBefore) entro 00:30", color: .green)
+                    quickInfoRow(icon: "mappin.circle.fill", text: "\(HZooConfig.venueName) \(HZooConfig.venueLocation)", color: .orange)
+                    
+                    // Omaggio donna sotto il luogo (solo se attivo)
+                    if countdownVM.showLadiesFreeBadge || debugTestSerataOmaggio {
+                        quickInfoRow(icon: "sparkles", text: "Omaggio donna scade tra \(debugTestSerataOmaggio ? "01:00" : countdownVM.ladiesCountdown)", color: HZooConfig.accentCyan)
+                    }
+                } else {
+                    // Prima della serata: tutte le info
+                    quickInfoRow(icon: "clock.fill", text: "Start ore 23:00", color: HZooConfig.accentCyan)
+                    quickInfoRow(icon: "eurosign.circle.fill", text: "♂ \(HZooConfig.priceMan) · ♀ \(HZooConfig.priceLadyBefore) entro 00:30", color: .green)
+                    quickInfoRow(icon: "mappin.circle.fill", text: "\(HZooConfig.venueName) \(HZooConfig.venueLocation)", color: .orange)
+                }
             }
         }
         .padding(20)
         .background(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.06))
-                .shadow(color: HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.1), radius: 16, x: 0, y: 8)
+                .fill(
+                    (countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio) 
+                    ? HZooConfig.primaryNeon.opacity(0.1) 
+                    : HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.06)
+                )
+                .shadow(
+                    color: (countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio) 
+                    ? HZooConfig.primaryNeon.opacity(0.2) 
+                    : HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.1), 
+                    radius: 16, x: 0, y: 8
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(
                     LinearGradient(
-                        colors: [HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.3), HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.1)],
+                        colors: (countdownVM.isEventActive || debugTestSerata || debugTestSerataOmaggio) 
+                        ? [HZooConfig.primaryNeon.opacity(0.5), HZooConfig.primaryNeon.opacity(0.2)]
+                        : [HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.3), HZooConfig.eventColor(for: countdownVM.nextEventNumber).opacity(0.1)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
@@ -2676,59 +2681,6 @@ struct HomeTabView: View {
         .shadow(color: HZooConfig.primaryNeon.opacity(0.15), radius: 20, x: 0, y: 10)
     }
     
-    // MARK: - Omaggio Donna Card
-    private var ladiesFreeCard: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .font(.title2)
-                        .foregroundStyle(HZooConfig.primaryNeon)
-                    
-                    Text("OMAGGIO DONNA")
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(.white)
-                }
-                
-                Text("Ingresso gratuito per le donne fino alle 00:30")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.8))
-            }
-            
-            Spacer()
-            
-            VStack(spacing: 4) {
-                Text("SCADE TRA")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .tracking(0.5)
-                
-                Text(debugTestBanner ? "01:00" : countdownVM.ladiesCountdown)
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(HZooConfig.primaryNeon)
-                    .monospacedDigit()
-            }
-        }
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            HZooConfig.primaryNeon.opacity(0.15),
-                            HZooConfig.primaryNeon.opacity(0.05)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(HZooConfig.primaryNeon.opacity(0.3), lineWidth: 1)
-        )
-        .shadow(color: HZooConfig.primaryNeon.opacity(0.2), radius: 8, x: 0, y: 4)
-    }
     
     // MARK: - KPI Quick Actions
     private var kpiQuickActionsSection: some View {
@@ -2939,24 +2891,6 @@ struct PrenotaTabView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 32) {
-                    // Hero
-                    VStack(spacing: 12) {
-                        Image(systemName: "calendar.badge.plus")
-                            .font(.system(size: 50))
-                            .foregroundStyle(HZooConfig.primaryNeon)
-                        
-                        Text("Prenota il Tuo Tavolo")
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(HZooConfig.textWhite)
-                            .multilineTextAlignment(.center)
-                        
-                        Text("Tavoli in sala e privé. Ingresso compreso per il gruppo. Consigliato arrivo entro le 00:30")
-                            .font(.subheadline)
-                            .foregroundStyle(HZooConfig.textWhite.opacity(0.7))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 20)
-                    }
-                    .padding(.top, 24)
                     
                     // Tipologie di Tavoli
                     VStack(alignment: .leading, spacing: 16) {
@@ -2976,7 +2910,7 @@ struct PrenotaTabView: View {
                                 .fill(Color(hex: "1a1a1a"))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                        .strokeBorder(HZooConfig.textWhite.opacity(0.1), lineWidth: 1)
+                                        .strokeBorder(HZooConfig.textWhite.opacity(0.2), lineWidth: 1)
                                 )
                         )
                     }
@@ -3089,7 +3023,18 @@ struct PrenotaTabView: View {
                 .padding(.bottom, 32)
             }
             .background(HZooConfig.backgroundDark.ignoresSafeArea())
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Tavolo")
+            .navigationBarTitleDisplayMode(.large)
+            .onAppear {
+                let appearance = UINavigationBarAppearance()
+                appearance.configureWithTransparentBackground()
+                appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
+                appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+                
+                UINavigationBar.appearance().standardAppearance = appearance
+                UINavigationBar.appearance().scrollEdgeAppearance = appearance
+                UINavigationBar.appearance().compactAppearance = appearance
+            }
             .sheet(isPresented: $showComingSoon) {
                 ComingSoonView()
             }
@@ -3487,6 +3432,10 @@ struct MinigameTabView: View {
 
     @State private var eventOverlayQueue: [EventOverlayItem] = []
     @State private var currentEventOverlay: EventOverlayItem? = nil
+    
+    // Toast Notification System
+    @State private var toastQueue: [ToastItem] = []
+    @State private var currentToasts: [ToastItem] = []
 
     private func enqueueEventOverlay(_ item: EventOverlayItem) {
         eventOverlayQueue.append(item)
@@ -3506,6 +3455,22 @@ struct MinigameTabView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { presentNextEventOverlay() }
     }
     
+    // MARK: - Toast Notification Functions
+    private func showToast(_ text: String, symbol: String, colors: [Color], duration: TimeInterval = 2.5) {
+        let toast = ToastItem(title: text, icon: symbol, colors: colors, duration: duration)
+        
+        // Se abbiamo già 3 toast attive, rimuovi la più vecchia
+        if currentToasts.count >= 3 {
+            currentToasts.removeFirst()
+        }
+        
+        currentToasts.append(toast)
+    }
+    
+    private func dismissToast(_ toast: ToastItem) {
+        currentToasts.removeAll { $0.id == toast.id }
+    }
+    
     @State private var bobbing = false
     @State private var pulse = false
     @State private var showDeathScreen: Bool = false
@@ -3515,10 +3480,10 @@ struct MinigameTabView: View {
     @State private var showTutorial = false
     @State private var showSettings = false
     @State private var showEventLog = false
+    @State private var showObiettivi = false
     @State private var showDailySlot = false
     @State private var showPavoLireInfo = false
     @State private var eventLog: [LoggedEvent] = []
-    @State private var showMenuOptions = false
     @AppStorage("El-PavoReal.seenTutorial") private var seenTutorial: Bool = false
     @AppStorage("El-PavoReal.lastActive") private var lastActiveTS: Double = Date().timeIntervalSince1970
     @AppStorage("El-PavoReal.lastDailySlotDate") private var lastDailySlotDate: String = ""
@@ -3602,7 +3567,7 @@ struct MinigameTabView: View {
         switch prize {
         case .coins(let amount):
             vm.PavoLire += amount
-            enqueueEventOverlay(EventOverlayItem(title: "JACKPOT! 🎰", icon: "dollarsign.circle.fill", tone: .positive, lines: ["+\(amount) PavoLire!"], autoDismiss: false, duration: 3.0))
+            enqueueEventOverlay(EventOverlayItem(title: "JACKPOT! 🎰", icon: "sterlingsign.circle.fill", tone: .positive, lines: ["+\(amount) PavoLire!"], autoDismiss: false, duration: 3.0))
         case .xp(let amount):
             vm.xp += amount
             enqueueEventOverlay(EventOverlayItem(title: "BONUS XP! ⭐", icon: "star.fill", tone: .positive, lines: ["+\(amount) XP guadagnati!"], autoDismiss: false, duration: 3.0))
@@ -3754,9 +3719,15 @@ struct MinigameTabView: View {
                 .environmentObject(vm)
                 .presentationBackground(Color.black.opacity(0.6))
             }
-            // EventiLog
+            // Eventi
             .sheet(isPresented: $showEventLog) {
-                EventCenterSheet(log: $eventLog)
+                EventiSheet(log: $eventLog)
+                    .environmentObject(vm)
+                    .presentationBackground(Color.black.opacity(0.45))
+            }
+            // Obiettivi
+            .sheet(isPresented: $showObiettivi) {
+                ObiettiviSheet()
                     .environmentObject(vm)
                     .presentationBackground(Color.black.opacity(0.45))
             }
@@ -3834,25 +3805,21 @@ struct MinigameTabView: View {
         }
         .confirmationDialog("Scegli un'opzione", isPresented: Binding(get: { quickPickKind != nil }, set: { if !$0 { quickPickKind = nil } }), titleVisibility: .visible) {
             if quickPickKind == .drink {
+                Button("Negroni") { chooseDrink("Negroni") }
                 Button("Gin Tonic") { chooseDrink("Gin Tonic") }
                 Button("Vodka Lemon") { chooseDrink("Vodka Lemon") }
-                Button("Negroni") { chooseDrink("Negroni") }
-                Button("Acqua Fresca") { chooseDrink("Acqua Fresca") }
             } else if quickPickKind == .shot {
-                Button("Tequila Bum Bum") { chooseShot("Tequila Bum Bum") }
-                Button("Jägerbomb") { chooseShot("Jägerbomb") }
-                Button("Sambuca") { chooseShot("Sambuca") }
-                Button("Rum e Lime") { chooseShot("Rum e Lime") }
+                Button("Tequila") { chooseShot("Tequila") }
+                Button("Vodka") { chooseShot("Vodka") }
+                Button("Amaro") { chooseShot("Amaro") }
             } else if quickPickKind == .relax {
-                Button("Respiro") { chooseRelax("Respiro") }
-                Button("Stretching") { chooseRelax("Stretching") }
-                Button("Pausa") { chooseRelax("Pausa") }
-                Button("Reset") { chooseRelax("Reset") }
+                Button("Pisolino") { chooseRelax("Pisolino") }
+                Button("Divanetto") { chooseRelax("Divanetto") }
+                Button("Sigaretta") { chooseRelax("Sigaretta") }
             } else if quickPickKind == .sigla {
-                Button("Sigla Originale") { chooseSigla("Sigla Originale") }
-                Button("Sigla Acustica") { chooseSigla("Sigla Acustica") }
-                Button("Sigla Rock") { chooseSigla("Sigla Rock") }
-                Button("Sigla Pop") { chooseSigla("Sigla Pop") }
+                Button("Alza la voce") { chooseSigla("Alza la voce") }
+                Button("Sgombra la mente") { chooseSigla("Sgombra la mente") }
+                Button("Sogna!") { chooseSigla("Sogna!") }
             }
         }
         .environmentObject(vm)
@@ -3917,7 +3884,20 @@ struct MinigameTabView: View {
             let lines = note.userInfo?["lines"] as? [String] ?? []
             enqueueEventOverlay(EventOverlayItem(title: title, icon: icon, tone: tone, lines: lines, autoDismiss: false, duration: 3.0))
         }
+        .overlay(alignment: .top) {
+            // Toast Notifications (non-invasive)
+            VStack(spacing: 8) {
+                ForEach(currentToasts) { toast in
+                    ToastView(item: toast) {
+                        dismissToast(toast)
+                    }
+                }
+            }
+            .padding(.top, 60) // Sotto la Dynamic Island
+            .zIndex(50)
+        }
         .overlay(alignment: .center) {
+            // Full-screen overlays per eventi importanti
             if let it = currentEventOverlay {
                 EventOverlayView(item: it) { dismissCurrentEventOverlay() }
                     .zIndex(100)
@@ -4033,20 +4013,20 @@ struct MinigameTabView: View {
         }
     }
 
-    struct EventCenterSheet: View {
+    // MARK: - Eventi Sheet
+    struct EventiSheet: View {
         @EnvironmentObject var vm: PetViewModel
         @Binding var log: [LoggedEvent]
-        @State private var tab: Int = 0
 
         var body: some View {
             VStack(spacing: 16) {
                 // Header
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Centro eventi")
+                    Text("Eventi")
                         .font(.largeTitle.bold())
                         .foregroundStyle(.white)
                         .padding(.top, 20)
-                    Text("Qui trovi gli imprevisti recenti e tutti gli obiettivi da sbloccare. Gli eventi vengono registrati durante il gioco: gli obiettivi si completano automaticamente quando soddisfi i requisiti.")
+                    Text("Qui trovi tutti gli imprevisti e eventi casuali registrati durante il gioco.")
                         .font(.footnote)
                         .foregroundStyle(.white.opacity(0.85))
                         .fixedSize(horizontal: false, vertical: true)
@@ -4055,24 +4035,39 @@ struct MinigameTabView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
 
-                // Switcher
-                Picker("Sezione", selection: $tab) {
-                    Text("Eventi").tag(0)
-                    Text("Obiettivi").tag(1)
+                // Content
+                EventLogList(log: $log)
+            }
+            .background(Color.black.opacity(0.45).ignoresSafeArea())
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+    }
+    
+    // MARK: - Obiettivi Sheet
+    struct ObiettiviSheet: View {
+        @EnvironmentObject var vm: PetViewModel
+
+        var body: some View {
+            VStack(spacing: 16) {
+                // Header
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Obiettivi")
+                        .font(.largeTitle.bold())
+                        .foregroundStyle(.white)
+                        .padding(.top, 20)
+                    Text("Completa gli obiettivi per sbloccare ricompense e funzionalità. Si completano automaticamente quando soddisfi i requisiti.")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.85))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .pickerStyle(.segmented)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 20)
+                .padding(.top, 8)
 
                 // Content
-                Group {
-                    if tab == 0 {
-                        EventLogList(log: $log)
-                    } else {
-                        AchievementsTab()
-                            .environmentObject(vm)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                AchievementsTab()
+                    .environmentObject(vm)
             }
             .background(Color.black.opacity(0.45).ignoresSafeArea())
             .presentationDetents([.large])
@@ -4528,60 +4523,45 @@ private struct ConfettiBurst: View {
                 }
                 .buttonStyle(.plain)
                 
-                // Menu collassabile per Shop, Eventi, Impostazioni
-                ZStack {
-                    // Menu aperto
-                    if showMenuOptions {
-                        HStack(spacing: 12) {
-                            Button { 
-                                showShop = true
-                                showMenuOptions = false
-                            } label: {
-                                Image(systemName: "cart")
-                                    .font(.title3.weight(.semibold))
-                                    .foregroundStyle(.white)
-                            }
-                            .buttonStyle(.plain)
-                            .frame(width: 34, height: 34)
-                            .background(.ultraThinMaterial.opacity(0.3), in: Circle())
-                            .transition(.scale.combined(with: .opacity))
-                            
-                            Button { 
-                                showEventLog = true
-                                showMenuOptions = false
-                            } label: {
-                                Image(systemName: "clock")
-                                    .font(.title3.weight(.semibold))
-                                    .foregroundStyle(.white)
-                            }
-                            .buttonStyle(.plain)
-                            .frame(width: 34, height: 34)
-                            .background(.ultraThinMaterial.opacity(0.3), in: Circle())
-                            .transition(.scale.combined(with: .opacity))
-                            
-                            Button { 
-                                showSettings = true
-                                showMenuOptions = false
-                            } label: {
-                                Image(systemName: "gearshape")
-                                    .font(.title3.weight(.semibold))
-                                    .foregroundStyle(.white)
-                            }
-                            .buttonStyle(.plain)
-                            .frame(width: 34, height: 34)
-                            .background(.ultraThinMaterial.opacity(0.3), in: Circle())
-                            .transition(.scale.combined(with: .opacity))
-                        }
-                    }
-                    
-                    // Pulsante menu principale
+                // Shop, Eventi, Obiettivi, Impostazioni sempre visibili
+                HStack(spacing: 12) {
                     Button { 
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            showMenuOptions.toggle()
-                        }
-                        haptic(.soft)
+                        showShop = true
                     } label: {
-                        Image(systemName: showMenuOptions ? "xmark" : "ellipsis")
+                        Image(systemName: "cart")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 34, height: 34)
+                    .background(.ultraThinMaterial.opacity(0.3), in: Circle())
+                    
+                    Button { 
+                        showEventLog = true
+                    } label: {
+                        Image(systemName: "clock")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 34, height: 34)
+                    .background(.ultraThinMaterial.opacity(0.3), in: Circle())
+                    
+                    Button { 
+                        showObiettivi = true
+                    } label: {
+                        Image(systemName: "target")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                    .buttonStyle(.plain)
+                    .frame(width: 34, height: 34)
+                    .background(.ultraThinMaterial.opacity(0.3), in: Circle())
+                    
+                    Button { 
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(.white)
                     }
@@ -5050,16 +5030,8 @@ fileprivate struct StatTile: View {
     
     // MARK: - Notifiche Non Invasive per Azioni Principali
     private func showQuickToast(_ text: String, symbol: String, colors: [Color]) {
-        // Aggiungi toast alla coda che scompare automaticamente
-        let toast = EventOverlayItem(
-            title: text,
-            icon: symbol,
-            tone: .positive,
-            lines: [],
-            autoDismiss: true,
-            duration: 2.0
-        )
-        enqueueEventOverlay(toast)
+        // Usa il nuovo sistema toast non invasivo
+        showToast(text, symbol: symbol, colors: colors, duration: 2.0)
     }
 
 // MARK: - Helper Components for New Tabs
@@ -5776,8 +5748,8 @@ private func computedMood(for vm: PetViewModel) -> MoodState {
     if vm.energy < 32 { return .stanchezza }
     if vm.happiness < 28 && (vm.satiety < 35 || vm.hygiene < 35) { return .rabbia }
 
-    // Offline non ha una misura affidabile di inattività: usa una soglia semplice sulla Festa
-    if vm.happiness < 55 { return .noia }
+    // NOIA: solo se felicità molto bassa E altre stats non sono buone
+    if vm.happiness < 35 && avgStat < 50 { return .noia }
 
     return .neutro
 }
@@ -7343,6 +7315,22 @@ private struct EventOverlayItem: Identifiable {
     }
 }
 
+// MARK: - Toast Notification System
+struct ToastItem: Identifiable {
+    let id = UUID()
+    let title: String
+    let icon: String
+    let colors: [Color]
+    let duration: TimeInterval
+    
+    init(title: String, icon: String, colors: [Color], duration: TimeInterval = 2.5) {
+        self.title = title
+        self.icon = icon
+        self.colors = colors
+        self.duration = duration
+    }
+}
+
 private struct EventOverlayView: View {
     let item: EventOverlayItem
     var onDismiss: () -> Void
@@ -7432,6 +7420,67 @@ private struct EventOverlayView: View {
             }
         }
         .allowsHitTesting(true) // blocca il tocco sotto
+    }
+}
+
+// MARK: - Toast View (Non-invasive notifications)
+private struct ToastView: View {
+    let item: ToastItem
+    var onDismiss: () -> Void
+    
+    @State private var isVisible = false
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // Icon
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: item.colors, startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 32, height: 32)
+                Image(systemName: item.icon)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            
+            // Text
+            Text(item.title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.leading)
+            
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+        .padding(.horizontal, 20)
+        .offset(y: isVisible ? 0 : -100)
+        .opacity(isVisible ? 1 : 0)
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                isVisible = true
+            }
+            
+            // Auto-dismiss
+            DispatchQueue.main.asyncAfter(deadline: .now() + item.duration) {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    isVisible = false
+                }
+                
+                // Rimuovi dalla coda dopo l'animazione
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    onDismiss()
+                }
+            }
+        }
     }
 }
 
@@ -8741,7 +8790,7 @@ private enum SlotPrize {
     
     var icon: String {
         switch self {
-        case .coins: return "dollarsign.circle.fill"
+        case .coins: return "sterlingsign.circle.fill"
         case .xp: return "star.fill"
         case .booster: return "bolt.heart.fill"
         case .statBoost: return "sparkles"
@@ -8750,7 +8799,7 @@ private enum SlotPrize {
 }
 
 private enum SlotIcon: String, CaseIterable {
-    case coin = "dollarsign.circle.fill"
+    case coin = "sterlingsign.circle.fill"
     case star = "star.fill"
     case heart = "heart.fill"
     case bolt = "bolt.heart.fill"
@@ -9095,11 +9144,16 @@ private struct PavoLireInfoView: View {
                     VStack(spacing: 24) {
                         // Header
                         VStack(spacing: 12) {
-                            Image(systemName: "dollarsign.circle.fill")
-                                .font(.system(size: 60))
-                                .foregroundStyle(
-                                    LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)
-                                )
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                    )
+                                    .frame(width: 80, height: 80)
+                                Text("P£")
+                                    .font(.system(size: 32, weight: .bold))
+                                    .foregroundStyle(.white)
+                            }
                             
                             Text("PavoLire")
                                 .font(.largeTitle.bold())
@@ -9117,11 +9171,16 @@ private struct PavoLireInfoView: View {
                                 .foregroundStyle(.white)
                             
                             HStack(spacing: 12) {
-                                Image(systemName: "dollarsign.circle.fill")
-                                    .font(.title)
-                                    .foregroundStyle(
-                                        LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)
-                                    )
+                                ZStack {
+                                    Circle()
+                                        .fill(
+                                            LinearGradient(colors: [.blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                        )
+                                        .frame(width: 32, height: 32)
+                                    Text("P£")
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundStyle(.white)
+                                }
                                 
                                 Text("\(vm.PavoLire) P£")
                                     .font(.title.bold())
@@ -10099,17 +10158,6 @@ struct PrezziView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    // Hero
-                    VStack(spacing: 12) {
-                        Image(systemName: "eurosign.circle.fill")
-                            .font(.system(size: 50))
-                            .foregroundStyle(HZooConfig.primaryNeon)
-                        
-                        Text("Info Prezzi")
-                            .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(HZooConfig.textWhite)
-                    }
-                    .padding(.top, 24)
                     
                     // Prezzi Ingresso
                     VStack(alignment: .leading, spacing: 16) {
@@ -10122,8 +10170,14 @@ struct PrezziView: View {
                             priceRow(icon: "👗", title: "Donna", price: "Omaggio", detail: "Omaggio entro le 00:30, poi 15€")
                         }
                         .padding(16)
-                        .background(Color(hex: "1a1a1a"))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color(hex: "1a1a1a"))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .strokeBorder(HZooConfig.textWhite.opacity(0.2), lineWidth: 1)
+                                )
+                        )
                     }
                     
                     // Servizi
@@ -10137,8 +10191,14 @@ struct PrezziView: View {
                             priceRow(icon: "🍸", title: "Consumazione", price: HZooConfig.priceDrink, detail: "Drink e cocktail")
                         }
                         .padding(16)
-                        .background(Color(hex: "1a1a1a"))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .background(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color(hex: "1a1a1a"))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .strokeBorder(HZooConfig.textWhite.opacity(0.2), lineWidth: 1)
+                                )
+                        )
                     }
                     
                     // Note
@@ -10161,7 +10221,18 @@ struct PrezziView: View {
                 .padding(.bottom, 32)
             }
             .background(Color.black.ignoresSafeArea())
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Prezzi")
+            .navigationBarTitleDisplayMode(.large)
+            .onAppear {
+                let appearance = UINavigationBarAppearance()
+                appearance.configureWithTransparentBackground()
+                appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
+                appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+                
+                UINavigationBar.appearance().standardAppearance = appearance
+                UINavigationBar.appearance().scrollEdgeAppearance = appearance
+                UINavigationBar.appearance().compactAppearance = appearance
+            }
         }
         .onAppear {
             trackEvent("view_prezzi")
@@ -10619,87 +10690,6 @@ struct ScrollOffsetPreferenceKey: PreferenceKey {
     
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
-    }
-}
-
-// MARK: - Dynamic Scroll Gradient Overlay
-struct ScrollGradientOverlay: View {
-    let scrollOffset: CGFloat
-    let isEventActive: Bool
-    
-    // Calcola se il contenuto sta scorrendo sotto la Dynamic Island
-    private var shouldShowGradient: Bool {
-        // Il gradiente appare quando il contenuto scorre verso l'alto (scrollOffset < 0)
-        // e si avvicina alla Dynamic Island - soglia più bassa per attivazione più veloce
-        return scrollOffset < -5
-    }
-    
-    // Intensità del gradiente basata su quanto il contenuto è sotto la Dynamic Island
-    private var gradientIntensity: Double {
-        let maxOffset: CGFloat = 40 // Offset più piccolo per gradiente più intenso
-        let clampedOffset = max(-maxOffset, scrollOffset)
-        let intensity = Double(-clampedOffset / maxOffset)
-        return min(1.0, max(0.5, intensity)) // Minimo 50% di opacità quando attivo
-    }
-    
-    var body: some View {
-        // DEBUG: Print per verificare scrollOffset
-        let _ = print("ScrollGradientOverlay - scrollOffset: \(scrollOffset), shouldShow: \(shouldShowGradient), intensity: \(gradientIntensity)")
-        
-        if shouldShowGradient {
-            VStack {
-                // Gradiente sotto Dynamic Island - NERO SOLIDO per nascondere contenuto
-                LinearGradient(
-                    colors: [
-                        Color.black,
-                        Color.black.opacity(0.95),
-                        Color.black.opacity(0.8),
-                        Color.black.opacity(0.5),
-                        Color.clear
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 100)
-                .ignoresSafeArea(.container, edges: .top)
-                
-                // Gradiente sotto banner "Serata in Corso" (se attivo) - Verdolino con blur
-                if isEventActive {
-                    LinearGradient(
-                        colors: [
-                            Color.green.opacity(0.8),
-                            Color.green.opacity(0.5),
-                            Color.green.opacity(0.2),
-                            Color.clear
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 100)
-                    .blur(radius: 2)
-                    .opacity(gradientIntensity)
-                } else {
-                    // Gradiente nero quando non ci sono banner in alto
-                    LinearGradient(
-                        colors: [
-                            Color.black.opacity(0.95),
-                            Color.black.opacity(0.8),
-                            Color.black.opacity(0.5),
-                            Color.clear
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 60)
-                    .opacity(gradientIntensity)
-                }
-                
-                
-                Spacer()
-            }
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.2), value: shouldShowGradient)
-        }
     }
 }
 
