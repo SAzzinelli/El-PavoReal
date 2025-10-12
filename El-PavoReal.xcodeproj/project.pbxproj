@@ -10,22 +10,9 @@
 		FCE9463F2E59D3E900490D79 /* El-PavoReal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "El-PavoReal.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		FC65D1262E9A856200497069 /* Exceptions for "El-PavoReal" folder in "El-PavoReal" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = FCE9463E2E59D3E900490D79 /* El-PavoReal */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		FCE946412E59D3E900490D79 /* El-PavoReal */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				FC65D1262E9A856200497069 /* Exceptions for "El-PavoReal" folder in "El-PavoReal" target */,
-			);
 			path = "El-PavoReal";
 			sourceTree = "<group>";
 		};
