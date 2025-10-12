@@ -277,6 +277,8 @@
 				MARKETING_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.simoneazzinelli.pavogotchi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				"NSLocationWhenInUseUsageDescription" = "Questa app ha bisogno della tua posizione per mostrarti i tavoli più vicini";
+				"NSCameraUsageDescription" = "Questa app ha bisogno della camera per scattare foto";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -317,6 +319,8 @@
 				MARKETING_VERSION = 1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.simoneazzinelli.pavogotchi;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				"NSLocationWhenInUseUsageDescription" = "Questa app ha bisogno della tua posizione per mostrarti i tavoli più vicini";
+				"NSCameraUsageDescription" = "Questa app ha bisogno della camera per scattare foto";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
