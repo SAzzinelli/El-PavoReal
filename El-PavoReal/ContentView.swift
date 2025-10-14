@@ -2578,7 +2578,7 @@ struct HomeTabView: View {
                                         .font(.system(size: 40))
                                         .foregroundStyle(HZooConfig.primaryNeon)
                                     
-                                    Text(video.type == .aftermovie ? "AFTERMOVIE" : "TIKTOK")
+                                    Text(video.type == .aftermovie ? "AFTERMOVIE" : "BACKSTAGE")
                                         .font(.caption.weight(.bold))
                                         .foregroundStyle(.white)
                                         .padding(.horizontal, 8)
@@ -10958,7 +10958,7 @@ struct RemoteVideoListView: View {
                     }
                 }
             }
-            .navigationTitle(type == .aftermovie ? "AFTERMOVIE" : "TIKTOK")
+            .navigationTitle(type == .aftermovie ? "AFTERMOVIE" : "BACKSTAGE")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
