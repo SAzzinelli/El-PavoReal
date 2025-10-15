@@ -7,8 +7,18 @@
       "thumbnail": "https://SAzzinelli.github.io/El-PavoReal/thumbnails/aftermovie1_thumb.png",
       "videoUrl": "https://SAzzinelli.github.io/El-PavoReal/videos/aftermovie1.mp4",
       "date": "03/10/2025",
-      "duration": "2:30",
+      "duration": "0:32",
       "shareUrl": "https://www.instagram.com/p/DPjlqymDUI7/"
+    },
+    {
+      "id": "aftermovie2",
+      "title": "AFTERMOVIE #2",
+      "description": "MORE PAVO POR FAVOR!! ❤️",
+      "thumbnail": "https://SAzzinelli.github.io/El-PavoReal/thumbnails/aftermovie2_thumb.png",
+      "videoUrl": "https://SAzzinelli.github.io/El-PavoReal/videos/aftermovie2.mp4",
+      "date": "10/10/2025",
+      "duration": "0:28",
+      "shareUrl": "https://www.instagram.com/reel/DP1pDDFDRoz/?igsh=MXF4MWl3eXdjYzY4"
     }
   ],
   "backstage": [
